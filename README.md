@@ -1,6 +1,6 @@
 # Product Inventory System
 
-This is a simple IM101 project made with Python, Tkinter, and SQLite.
+This is a simple IM102 project made with Python, Tkinter, and SQLite.
 
 The app helps you keep a list of products. You can add a product, see the saved products, change product details, and delete products you no longer need.
 

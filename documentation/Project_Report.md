@@ -3,7 +3,7 @@
 ## 1. Title Page
 
 Project Title: Product Inventory Management System  
-Subject: IM101 CRUD Operations Project  
+Subject: IM102 CRUD Operations Project  
 Group Members: Member 1, Member 2, Member 3, Member 4  
 Instructor: Instructor Name  
 Date: October 8, 2026

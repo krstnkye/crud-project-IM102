@@ -102,7 +102,7 @@ def build_pdf():
     story = []
     story.append(Paragraph("Product Inventory Management System", styles["Title"]))
     story.append(Spacer(1, 0.15 * inch))
-    story.append(paragraph("Subject: IM101 CRUD Operations Project", styles["Body"]))
+    story.append(paragraph("Subject: IM102 CRUD Operations Project", styles["Body"]))
     story.append(paragraph("Group Members: Member 1, Member 2, Member 3, Member 4", styles["Body"]))
     story.append(paragraph("Instructor: Instructor Name", styles["Body"]))
     story.append(paragraph("Date: October 8, 2026", styles["Body"]))

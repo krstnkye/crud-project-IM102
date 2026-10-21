@@ -161,7 +161,7 @@ def build_document():
 
     subtitle = doc.add_paragraph()
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    subtitle.add_run("IM101 CRUD Operations Project").bold = True
+    subtitle.add_run("IM102 CRUD Operations Project").bold = True
 
     info = doc.add_paragraph()
     info.alignment = WD_ALIGN_PARAGRAPH.CENTER
