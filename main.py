@@ -373,14 +373,21 @@ class InventoryApp:
             return
 
         try:
-            database.add_product(*values)
+            result = database.add_product(*values)
         except sqlite3.DatabaseError:
             messagebox.showerror("Save Problem", "Unable to save changes. Please try again.")
             return
 
         self.refresh_data()
         self.clear_fields()
-        messagebox.showinfo("Done", "Product added successfully.")
+        if result == "restocked":
+            messagebox.showinfo(
+                "Done",
+                "A product with the same name, category, and price already exists. "
+                "Its quantity was increased.",
+            )
+        else:
+            messagebox.showinfo("Done", "Product added successfully.")
 
     def update_product(self):
         if self.selected_product_id is None:

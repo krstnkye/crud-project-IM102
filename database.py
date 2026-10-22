@@ -28,7 +28,34 @@ def initialize_database():
 
 
 def add_product(product_name, category, quantity, unit_price):
+    product_name = product_name.strip()
+    category = category.strip()
+
     with get_connection() as connection:
+        existing_product = connection.execute(
+            """
+            SELECT product_id
+            FROM products
+            WHERE product_name = ? COLLATE NOCASE
+              AND category = ? COLLATE NOCASE
+              AND ROUND(unit_price, 2) = ROUND(?, 2)
+            ORDER BY product_id
+            LIMIT 1
+            """,
+            (product_name, category, unit_price),
+        ).fetchone()
+
+        if existing_product:
+            connection.execute(
+                """
+                UPDATE products
+                SET quantity = quantity + ?
+                WHERE product_id = ?
+                """,
+                (quantity, existing_product["product_id"]),
+            )
+            return "restocked"
+
         connection.execute(
             """
             INSERT INTO products (product_name, category, quantity, unit_price)
@@ -36,6 +63,7 @@ def add_product(product_name, category, quantity, unit_price):
             """,
             (product_name, category, quantity, unit_price),
         )
+        return "created"
 
 
 def get_products():
