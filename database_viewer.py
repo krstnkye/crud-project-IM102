@@ -32,10 +32,10 @@ class DatabaseViewer:
         left.pack(side=tk.LEFT)
         tk.Label(
             left,
-            text="Database Records",
+            text="DATABASE RECORDS",
             bg=COLORS["page"],
             fg=COLORS["text"],
-            font=(theme.FONT, 18, "bold"),
+            font=(theme.MONO, 16, "bold"),
         ).pack(anchor=tk.W)
         tk.Label(
             left,
@@ -47,11 +47,12 @@ class DatabaseViewer:
 
         FlatButton(
             heading,
-            "↻  Refresh Database",
+            "↻  REFRESH DATABASE",
             self.load_records,
+            COLORS["button"],
+            COLORS["button_text"],
             COLORS["primary"],
-            "#ffffff",
-            COLORS["primary_hover"],
+            hover_fg="#ffffff",
         ).pack(side=tk.RIGHT)
 
         outer = tk.Frame(self.root, bg=COLORS["line"])
@@ -63,10 +64,10 @@ class DatabaseViewer:
 
         tk.Label(
             table_frame,
-            text="Table: products",
+            text="[TABLE: PRODUCTS]",
             bg=COLORS["card"],
-            fg=COLORS["text"],
-            font=(theme.FONT, 12, "bold"),
+            fg=COLORS["primary"],
+            font=(theme.MONO, 9, "bold"),
         ).grid(row=0, column=0, sticky="w", pady=(0, 12))
 
         columns = ("product_id", "product_name", "category", "quantity", "unit_price")
@@ -96,7 +97,7 @@ class DatabaseViewer:
             textvariable=self.status_var,
             bg=COLORS["page"],
             fg=COLORS["muted"],
-            font=(theme.FONT, 9),
+            font=(theme.MONO, 8),
             anchor=tk.W,
             padx=24,
             pady=14,

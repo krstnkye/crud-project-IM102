@@ -5,3 +5,4 @@ documentation/qa_render_*/
 .DS_Store
 Thumbs.db
 
+settings.json
