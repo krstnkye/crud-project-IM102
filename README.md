@@ -64,18 +64,23 @@ py main.py
 | Add Product | Saves a new product. |
 | Update | Changes the selected product. |
 | Delete | Removes the selected product after asking first. |
-| Clear | Empties the form so you can type again. |
-| Refresh | Reloads the product list and totals. |
-| Database Records | Opens a window that shows the raw rows inside `inventory.db`. |
+| Clear Fields | Empties the form so you can type again. |
+| New Product | Clears the form and puts the cursor in Product Name. |
+| DB Records | Opens a window that shows the raw rows inside `inventory.db`. |
+| Light Mode / Dark Mode | Switches the app between the dark and light theme. |
 
 Update and Delete only turn on after you click a product in the list.
 
 ## Helpful Extras
 
-- **Search:** type in the search box to filter products by name or category.
+- **Dark and light mode:** click the theme button at the top (or press `Ctrl+L`). The app remembers your choice in `settings.json`, which stays on your own computer.
+- **Category filter:** click a category chip above the table to show only that category.
+- **Search:** type in the search box to filter products by ID, name, or category.
 - **Sorting:** click a column heading to sort. Click it again to reverse the order.
 - **Stock status:** products with less than 10 pieces are shown in amber, and products with 0 pieces in red.
-- **Keyboard shortcuts:** `Enter` saves the form, `Esc` clears it, `Delete` removes the selected product, and `Ctrl+F` jumps to the search box.
+- **Product inspector:** shows the selected product's details and a stock bar compared with the low stock line.
+- **Activity log:** lists what you added, updated, or deleted while the app is open.
+- **Keyboard shortcuts:** `Enter` saves the form, `Esc` clears it, `Delete` removes the selected product, `Ctrl+F` jumps to the search box, and `Ctrl+L` switches the theme.
 
 ## Product Details
 
