@@ -23,6 +23,8 @@ The top part of the app shows:
 InventoryManagement/
 |-- main.py
 |-- database.py
+|-- database_viewer.py
+|-- theme.py
 |-- inventory.db (created automatically after the app starts)
 |-- README.md
 |-- .gitignore
@@ -62,7 +64,18 @@ py main.py
 | Add Product | Saves a new product. |
 | Update | Changes the selected product. |
 | Delete | Removes the selected product after asking first. |
-| Clear Fields | Empties the form so you can type again. |
+| Clear | Empties the form so you can type again. |
+| Refresh | Reloads the product list and totals. |
+| Database Records | Opens a window that shows the raw rows inside `inventory.db`. |
+
+Update and Delete only turn on after you click a product in the list.
+
+## Helpful Extras
+
+- **Search:** type in the search box to filter products by name or category.
+- **Sorting:** click a column heading to sort. Click it again to reverse the order.
+- **Stock status:** products with less than 10 pieces are shown in amber, and products with 0 pieces in red.
+- **Keyboard shortcuts:** `Enter` saves the form, `Esc` clears it, `Delete` removes the selected product, and `Ctrl+F` jumps to the search box.
 
 ## Product Details
 
@@ -77,14 +90,19 @@ py main.py
 
 ## Messages
 
-The app shows simple pop-up messages when:
+The app shows a small notice in the bottom-right corner when:
 
 - A product is saved
 - A product is changed
 - A product is deleted
+
+A red message appears inside the form when:
+
 - A required field is empty
 - Quantity or price has an invalid value
 - No product is selected before updating or deleting
+
+Deleting a product still asks for confirmation in a pop-up first.
 
 ## Suggested Testing
 

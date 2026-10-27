@@ -3,6 +3,9 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
+import theme
+from theme import COLORS, FlatButton
+
 
 DB_PATH = Path(__file__).with_name("inventory.db")
 
@@ -11,62 +14,60 @@ class DatabaseViewer:
     def __init__(self, root):
         self.root = root
         self.root.title("Database Records - inventory.db")
-        self.root.geometry("920x520")
+        self.root.geometry("960x560")
         self.root.minsize(760, 420)
-        self.root.configure(bg="#f8f9ff")
+
+        theme.load_fonts(self.root)
+        theme.apply_ttk_theme(self.root)
 
         self.status_var = tk.StringVar()
         self.build_screen()
         self.load_records()
 
     def build_screen(self):
-        heading = tk.Frame(self.root, bg="#213145", padx=18, pady=14)
+        heading = tk.Frame(self.root, bg=COLORS["page"], padx=24, pady=20)
         heading.pack(fill=tk.X)
 
+        left = tk.Frame(heading, bg=COLORS["page"])
+        left.pack(side=tk.LEFT)
         tk.Label(
-            heading,
+            left,
             text="Database Records",
-            bg="#213145",
-            fg="#ffffff",
-            font=("Segoe UI", 16, "bold"),
+            bg=COLORS["page"],
+            fg=COLORS["text"],
+            font=(theme.FONT, 18, "bold"),
         ).pack(anchor=tk.W)
         tk.Label(
-            heading,
+            left,
             text=str(DB_PATH),
-            bg="#213145",
-            fg="#dce7f5",
-            font=("Segoe UI", 9),
+            bg=COLORS["page"],
+            fg=COLORS["muted"],
+            font=(theme.MONO, 9, "normal"),
         ).pack(anchor=tk.W, pady=(3, 0))
 
-        toolbar = tk.Frame(self.root, bg="#f8f9ff", padx=18, pady=14)
-        toolbar.pack(fill=tk.X)
-
-        tk.Label(
-            toolbar,
-            text="Table: products",
-            bg="#f8f9ff",
-            fg="#0b1c30",
-            font=("Segoe UI", 12, "bold"),
-        ).pack(side=tk.LEFT)
-
-        tk.Button(
-            toolbar,
-            text="Refresh Database",
-            command=self.load_records,
-            bg="#004ac6",
-            fg="#ffffff",
-            activebackground="#2563eb",
-            activeforeground="#ffffff",
-            relief=tk.FLAT,
-            padx=16,
-            pady=8,
-            cursor="hand2",
+        FlatButton(
+            heading,
+            "↻  Refresh Database",
+            self.load_records,
+            COLORS["primary"],
+            "#ffffff",
+            COLORS["primary_hover"],
         ).pack(side=tk.RIGHT)
 
-        table_frame = tk.Frame(self.root, bg="#ffffff", padx=18, pady=4)
-        table_frame.pack(fill=tk.BOTH, expand=True)
-        table_frame.rowconfigure(0, weight=1)
+        outer = tk.Frame(self.root, bg=COLORS["line"])
+        outer.pack(fill=tk.BOTH, expand=True, padx=24)
+        table_frame = tk.Frame(outer, bg=COLORS["card"], padx=16, pady=16)
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+        table_frame.rowconfigure(1, weight=1)
         table_frame.columnconfigure(0, weight=1)
+
+        tk.Label(
+            table_frame,
+            text="Table: products",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=(theme.FONT, 12, "bold"),
+        ).grid(row=0, column=0, sticky="w", pady=(0, 12))
 
         columns = ("product_id", "product_name", "category", "quantity", "unit_price")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings")
@@ -82,20 +83,23 @@ class DatabaseViewer:
         self.tree.column("quantity", width=110, anchor=tk.CENTER)
         self.tree.column("unit_price", width=150, anchor=tk.E)
 
+        self.tree.tag_configure("even", background=COLORS["card"])
+        self.tree.tag_configure("odd", background=COLORS["row_alt"])
+
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.tree.grid(row=1, column=0, sticky="nsew")
+        scrollbar.grid(row=1, column=1, sticky="ns")
 
         tk.Label(
             self.root,
             textvariable=self.status_var,
-            bg="#eef3fb",
-            fg="#334155",
-            font=("Segoe UI", 9),
+            bg=COLORS["page"],
+            fg=COLORS["muted"],
+            font=(theme.FONT, 9),
             anchor=tk.W,
-            padx=18,
-            pady=10,
+            padx=24,
+            pady=14,
         ).pack(fill=tk.X)
 
     def load_records(self):
@@ -111,11 +115,11 @@ class DatabaseViewer:
                 """
             ).fetchall()
 
-        for record in records:
-            self.tree.insert("", tk.END, values=record)
+        for index, record in enumerate(records):
+            self.tree.insert("", tk.END, values=record, tags=("even" if index % 2 == 0 else "odd",))
 
         self.status_var.set(
-            f"{len(records)} product record(s). This window reads directly from inventory.db."
+            f"●  {len(records)} product record(s). This window reads directly from inventory.db."
         )
 
 
