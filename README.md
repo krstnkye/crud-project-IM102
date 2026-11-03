@@ -97,7 +97,7 @@ If you add a product with the same name, category, and price as one that is alre
 
 ## Messages
 
-The app shows a small notice in the bottom-right corner when:
+The app shows a small notice at the top of the window when:
 
 - A product is saved
 - A product is changed

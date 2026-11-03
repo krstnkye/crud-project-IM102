@@ -32,27 +32,26 @@ class DatabaseViewer:
         left.pack(side=tk.LEFT)
         tk.Label(
             left,
-            text="DATABASE RECORDS",
+            text="Database Records",
             bg=COLORS["page"],
-            fg=COLORS["text"],
-            font=(theme.MONO, 16, "bold"),
+            fg=COLORS["strong"],
+            font=(theme.FONT, 16, "bold"),
         ).pack(anchor=tk.W)
         tk.Label(
             left,
-            text=str(DB_PATH),
+            text=f"The rows exactly as they are saved in {DB_PATH.name}",
             bg=COLORS["page"],
             fg=COLORS["muted"],
-            font=(theme.MONO, 9, "normal"),
+            font=(theme.FONT, 9, "normal"),
         ).pack(anchor=tk.W, pady=(3, 0))
 
         FlatButton(
             heading,
-            "↻  REFRESH DATABASE",
+            "↻  Refresh Database",
             self.load_records,
             COLORS["button"],
             COLORS["button_text"],
-            COLORS["primary"],
-            hover_fg="#ffffff",
+            COLORS["primary_hover"],
         ).pack(side=tk.RIGHT)
 
         outer = tk.Frame(self.root, bg=COLORS["line"])
@@ -64,10 +63,10 @@ class DatabaseViewer:
 
         tk.Label(
             table_frame,
-            text="[TABLE: PRODUCTS]",
+            text="Table: products",
             bg=COLORS["card"],
-            fg=COLORS["primary"],
-            font=(theme.MONO, 9, "bold"),
+            fg=COLORS["strong"],
+            font=(theme.FONT, 11, "bold"),
         ).grid(row=0, column=0, sticky="w", pady=(0, 12))
 
         columns = ("product_id", "product_name", "category", "quantity", "unit_price")
@@ -97,7 +96,7 @@ class DatabaseViewer:
             textvariable=self.status_var,
             bg=COLORS["page"],
             fg=COLORS["muted"],
-            font=(theme.MONO, 8),
+            font=(theme.FONT, 9),
             anchor=tk.W,
             padx=24,
             pady=14,
@@ -120,7 +119,7 @@ class DatabaseViewer:
             self.tree.insert("", tk.END, values=record, tags=("even" if index % 2 == 0 else "odd",))
 
         self.status_var.set(
-            f"●  {len(records)} product record(s). This window reads directly from inventory.db."
+            f"{len(records)} product record(s)  ·  Read directly from {DB_PATH.name}  ·  Updates by itself after every change"
         )
 
 
