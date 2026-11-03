@@ -64,7 +64,8 @@ py main.py
 | Delete | Removes the selected product after asking first. |
 | Clear Fields | Empties the form so you can type again. |
 | New Product | Clears the form and puts the cursor in Product Name. |
-| DB Records | Opens a window that shows the raw rows inside `inventory.db`. It updates by itself after every change. |
+| Database Records | Opens a window that shows the raw rows inside `inventory.db`, the database details, and quick queries. It updates by itself after every change. |
+| Export CSV | In the Database Records window, saves the rows shown to a CSV file you can open in Excel. |
 | Light Mode / Dark Mode | Switches the app between the dark and light theme. |
 
 Update and Delete only turn on after you click a product in the list.
@@ -76,7 +77,8 @@ Update and Delete only turn on after you click a product in the list.
 - **Search:** type in the search box to filter products by ID, name, or category.
 - **Sorting:** click a column heading to sort. Click it again to reverse the order.
 - **Stock status:** products with less than 10 pieces are shown in amber, and products with 0 pieces in red.
-- **Product inspector:** shows the selected product's details and a stock bar compared with the low stock line.
+- **Product details:** shows the selected product's stock, price, total value, status, and a stock bar compared with the low stock line.
+- **Fonts:** the app uses Segoe UI, the normal Windows font. On Mac or Linux it uses a similar font that is already installed.
 - **Activity log:** lists what you added, updated, or deleted while the app is open.
 - **Keyboard shortcuts:** `Enter` saves the form, `Esc` clears it, `Delete` removes the selected product (click the table first), `Ctrl+F` jumps to the search box, and `Ctrl+L` switches the theme.
 
