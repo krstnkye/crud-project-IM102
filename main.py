@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import tkinter as tk
 from datetime import datetime
@@ -24,6 +25,22 @@ TABLE_COLUMNS = {
 LOG_COLORS = {"BOOT": "primary", "ADD": "green", "RESTOCK": "green", "UPDATE": "primary", "DELETE": "red", "ALERT": "amber", "ERROR": "red", "THEME": "muted"}
 
 
+QUANTITY_PATTERN = re.compile(r"-?\d+")
+PRICE_PATTERN = re.compile(r"-?(\d+(\.\d{1,2})?|\.\d{1,2})")
+
+
+def parse_quantity(text):
+    """Return the quantity as a whole number, or None if it is not a plain whole number."""
+    text = text.strip()
+    return int(text) if QUANTITY_PATTERN.fullmatch(text) else None
+
+
+def parse_price(text):
+    """Return the price as a number with at most 2 decimal places, or None if it is not valid."""
+    text = text.strip()
+    return float(text) if PRICE_PATTERN.fullmatch(text) else None
+
+
 def mono(size, weight="normal"):
     return (theme.MONO, size, weight)
 
@@ -47,6 +64,7 @@ class InventoryApp:
         self.toast_job = None
         self.placeholder_trace = None
         self.log_entries = []
+        self.viewer = None
 
         database.initialize_database()
 
@@ -527,6 +545,7 @@ class InventoryApp:
             font=mono(10),
         )
         combo.pack(fill=tk.X, pady=(4, 0), ipady=1)
+        self.category_entry = combo
         combo.bind("<Return>", lambda event: self.save_from_keyboard())
 
     def build_footer(self, parent):
@@ -654,8 +673,10 @@ class InventoryApp:
         if self.placeholder_trace:
             self.search_var.trace_remove("write", self.placeholder_trace)
             self.placeholder_trace = None
+        viewer_was_open = self.viewer_is_open()
         for widget in self.root.winfo_children():
             widget.destroy()
+        self.viewer = None
 
         # The typed form values, search text, and log are kept because they live outside the widgets.
         theme.apply_ttk_theme(self.root)
@@ -663,12 +684,24 @@ class InventoryApp:
         self.refresh_data()
         self.set_edit_mode(self.selected_product_id is not None)
         self.log("THEME", f"Switched to {new_mode} mode.")
+        if viewer_was_open:
+            self.open_database_viewer()
+
+    def viewer_is_open(self):
+        return self.viewer is not None and self.viewer.root.winfo_exists()
 
     def open_database_viewer(self):
+        """Open the DB Records window, or bring it to the front if it is already open."""
         import database_viewer
 
+        if self.viewer_is_open():
+            self.viewer.load_records()
+            self.viewer.root.deiconify()
+            self.viewer.root.lift()
+            return
+
         window = tk.Toplevel(self.root)
-        database_viewer.DatabaseViewer(window)
+        self.viewer = database_viewer.DatabaseViewer(window)
 
     # ------------------------------------------------------------------- CRUD
 
@@ -685,12 +718,11 @@ class InventoryApp:
             return None
 
         if not category:
-            self.show_error("Please enter a category.")
+            self.show_error("Please enter a category.", self.category_entry)
             return None
 
-        try:
-            quantity = int(quantity_text)
-        except ValueError:
+        quantity = parse_quantity(quantity_text)
+        if quantity is None:
             self.show_error("Quantity must be a whole number.", self.quantity_entry)
             return None
 
@@ -698,14 +730,9 @@ class InventoryApp:
             self.show_error("Quantity cannot be negative.", self.quantity_entry)
             return None
 
-        try:
-            unit_price = float(price_text)
-        except ValueError:
-            self.show_error("Please enter a valid price.", self.price_entry)
-            return None
-
-        if unit_price < 0:
-            self.show_error("Please enter a valid price.", self.price_entry)
+        unit_price = parse_price(price_text)
+        if unit_price is None or unit_price < 0:
+            self.show_error("Please enter a valid price, like 25 or 8.50.", self.price_entry)
             return None
 
         return product_name, category, quantity, unit_price
@@ -749,10 +776,14 @@ class InventoryApp:
 
         product_id = self.selected_product_id
         try:
-            database.update_product(product_id, *values)
+            result = database.update_product(product_id, *values)
         except sqlite3.DatabaseError:
             self.log("ERROR", "Unable to save changes.")
             messagebox.showerror("Save Problem", "Unable to save changes. Please try again.")
+            return
+
+        if result == "duplicate":
+            self.show_error("Another product already has the same name, category, and price.", self.name_entry)
             return
 
         self.refresh_data()
@@ -766,7 +797,8 @@ class InventoryApp:
             return
 
         product_id = self.selected_product_id
-        name = self.product_name_var.get()
+        product = self.find_product(product_id)
+        name = product["product_name"] if product else self.product_name_var.get()
         confirmed = messagebox.askyesno(
             "Delete Product",
             f"Are you sure you want to delete \"{name}\"?",
@@ -824,10 +856,9 @@ class InventoryApp:
         self.set_edit_mode(True)
 
     def update_item_total(self, *args):
-        try:
-            quantity = int(self.quantity_var.get() or 0)
-            price = float(self.unit_price_var.get() or 0)
-        except ValueError:
+        quantity = parse_quantity(self.quantity_var.get() or "0")
+        price = parse_price(self.unit_price_var.get() or "0")
+        if quantity is None or price is None:
             self.item_total_var.set(peso(0))
             return
 
@@ -870,6 +901,8 @@ class InventoryApp:
         else:
             self.low_stock_detail_var.set("ALL STOCK LEVELS OK")
         self.update_inspector()
+        if self.viewer_is_open():
+            self.viewer.load_records()
 
     def render_table(self):
         self.render_chips()

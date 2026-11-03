@@ -1,13 +1,13 @@
 import sqlite3
 import tkinter as tk
-from pathlib import Path
 from tkinter import ttk
 
+import database
 import theme
 from theme import COLORS, FlatButton
 
 
-DB_PATH = Path(__file__).with_name("inventory.db")
+DB_PATH = database.DB_PATH
 
 
 class DatabaseViewer:
@@ -125,6 +125,7 @@ class DatabaseViewer:
 
 
 def main():
+    database.initialize_database()
     root = tk.Tk()
     DatabaseViewer(root)
     root.mainloop()

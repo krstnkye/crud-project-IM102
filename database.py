@@ -78,7 +78,25 @@ def get_products():
 
 
 def update_product(product_id, product_name, category, quantity, unit_price):
+    product_name = product_name.strip()
+    category = category.strip()
+
     with get_connection() as connection:
+        duplicate = connection.execute(
+            """
+            SELECT product_id
+            FROM products
+            WHERE product_name = ? COLLATE NOCASE
+              AND category = ? COLLATE NOCASE
+              AND ROUND(unit_price, 2) = ROUND(?, 2)
+              AND product_id != ?
+            LIMIT 1
+            """,
+            (product_name, category, unit_price, product_id),
+        ).fetchone()
+        if duplicate:
+            return "duplicate"
+
         connection.execute(
             """
             UPDATE products
@@ -87,6 +105,7 @@ def update_product(product_id, product_name, category, quantity, unit_price):
             """,
             (product_name, category, quantity, unit_price, product_id),
         )
+        return "updated"
 
 
 def delete_product(product_id):

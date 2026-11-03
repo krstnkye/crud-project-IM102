@@ -20,7 +20,7 @@ The top part of the app shows:
 ## Folder Structure
 
 ```text
-InventoryManagement/
+crud-project-IM102/
 |-- main.py
 |-- database.py
 |-- database_viewer.py
@@ -29,21 +29,19 @@ InventoryManagement/
 |-- README.md
 |-- .gitignore
 |-- documentation/
-|   |-- Product_Inventory_System_Documentation.docx
-|   |-- Project_Report.md
-|   |-- Project_Report.pdf
+|   |-- IM102_Inventory_System_Documentation.docx
 |   |-- flowchart.mmd
-|   |-- build_final_documentation.py
-|   `-- generate_report_pdf.py
+|   `-- flowchart.png
 `-- screenshots/
-    `-- README.md
+    |-- README.md
+    `-- (pictures used in the documentation)
 ```
 
 `inventory.db` is the saved product file. It is made automatically when the app runs and is not uploaded to GitHub, so each user starts with an empty product list.
 
 ## How To Run
 
-1. Open the `InventoryManagement` folder in VS Code or IDLE.
+1. Open the `crud-project-IM102` folder in VS Code or IDLE.
 2. Open a terminal in that folder.
 3. Run:
 
@@ -66,7 +64,7 @@ py main.py
 | Delete | Removes the selected product after asking first. |
 | Clear Fields | Empties the form so you can type again. |
 | New Product | Clears the form and puts the cursor in Product Name. |
-| DB Records | Opens a window that shows the raw rows inside `inventory.db`. |
+| DB Records | Opens a window that shows the raw rows inside `inventory.db`. It updates by itself after every change. |
 | Light Mode / Dark Mode | Switches the app between the dark and light theme. |
 
 Update and Delete only turn on after you click a product in the list.
@@ -80,7 +78,11 @@ Update and Delete only turn on after you click a product in the list.
 - **Stock status:** products with less than 10 pieces are shown in amber, and products with 0 pieces in red.
 - **Product inspector:** shows the selected product's details and a stock bar compared with the low stock line.
 - **Activity log:** lists what you added, updated, or deleted while the app is open.
-- **Keyboard shortcuts:** `Enter` saves the form, `Esc` clears it, `Delete` removes the selected product, `Ctrl+F` jumps to the search box, and `Ctrl+L` switches the theme.
+- **Keyboard shortcuts:** `Enter` saves the form, `Esc` clears it, `Delete` removes the selected product (click the table first), `Ctrl+F` jumps to the search box, and `Ctrl+L` switches the theme.
+
+## Same Product Rule
+
+If you add a product with the same name, category, and price as one that is already saved, the app does not make a second copy. It adds the new quantity to the saved product instead. Updating a product so it matches another saved product is blocked.
 
 ## Product Details
 
@@ -104,7 +106,9 @@ The app shows a small notice in the bottom-right corner when:
 A red message appears inside the form when:
 
 - A required field is empty
-- Quantity or price has an invalid value
+- Quantity is not a whole number, or is negative
+- Price is not a normal number with up to 2 decimals (like 25 or 8.50), or is negative
+- An update would make the same product (same name, category, and price) as another one
 - No product is selected before updating or deleting
 
 Deleting a product still asks for confirmation in a pop-up first.
