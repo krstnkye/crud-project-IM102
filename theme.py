@@ -5,64 +5,81 @@ from tkinter import font as tkfont
 from tkinter import ttk
 
 
+# Colors for the dark "workstation" look and a matching light look.
 PALETTES = {
     "dark": {
-        "page": "#000000",
-        "card": "#09090b",
-        "card_high": "#131318",
-        "input": "#101014",
-        "line": "#242424",
-        "line_high": "#3a3a3a",
-        "text": "#dddddd",
-        "strong": "#ffffff",
-        "muted": "#8a8a8a",
-        "faint": "#555555",
-        "primary": "#aa88ff",
-        "primary_hover": "#c2a8ff",
-        "primary_soft": "#1b152b",
-        "primary_line": "#3b2d63",
-        "button": "#ffffff",
-        "button_text": "#000000",
-        "green": "#34d399",
-        "green_soft": "#0b1f17",
-        "amber": "#ffaa55",
-        "amber_soft": "#241a12",
-        "red": "#ff4466",
-        "red_soft": "#170a0e",
-        "red_hover": "#2b1018",
-        "red_line": "#441a23",
-        "row_alt": "#060608",
-        "row_low": "#14070b",
-        "selected": "#1d1730",
+        "page": "#0a0d1a",         # main background
+        "sidebar": "#0b0d1a",      # left side bar and footer
+        "header": "#10131f",       # top bar
+        "card": "#191b28",         # panels
+        "card_high": "#272937",    # hover, chips, table heading
+        "card_top": "#323442",
+        "input": "#0b0d1a",
+        "line": "#262a3a",
+        "line_high": "#3b494b",
+        "text": "#e1e1f3",
+        "strong": "#dbfcff",
+        "muted": "#849495",
+        "faint": "#56636a",
+        "dim": "#b9cacb",
+        "primary": "#00f0ff",      # cyan accent
+        "primary_hover": "#7df4ff",
+        "primary_soft": "#0c2a33",
+        "primary_line": "#00515a",
+        "button": "#00f0ff",
+        "button_text": "#00363a",
+        "secondary": "#ddb7ff",    # purple
+        "secondary_soft": "#2a1d3d",
+        "green": "#00f0ff",
+        "green_soft": "#0c2a33",
+        "amber": "#ffb95f",
+        "amber_soft": "#2f2414",
+        "red": "#ffb4ab",
+        "red_strong": "#ff5c5c",
+        "red_soft": "#3a1418",
+        "red_hover": "#4c1a1f",
+        "red_line": "#93000a",
+        "row_alt": "#0e1120",
+        "row_low": "#1f1a14",
+        "row_out": "#241418",
+        "selected": "#003a40",
     },
     "light": {
-        "page": "#f3f3f6",
+        "page": "#f2f5f8",
+        "sidebar": "#e8edf2",
+        "header": "#ffffff",
         "card": "#ffffff",
-        "card_high": "#ededf2",
-        "input": "#fafafc",
-        "line": "#dcdce3",
-        "line_high": "#c4c4cf",
-        "text": "#222228",
-        "strong": "#000000",
-        "muted": "#6b6b76",
-        "faint": "#a0a0aa",
-        "primary": "#6a43e8",
-        "primary_hover": "#5532d1",
-        "primary_soft": "#efe9ff",
-        "primary_line": "#cdbdff",
-        "button": "#111111",
+        "card_high": "#eef2f6",
+        "card_top": "#e2e8ee",
+        "input": "#ffffff",
+        "line": "#d9e0e7",
+        "line_high": "#bcc7d1",
+        "text": "#1d2733",
+        "strong": "#06363c",
+        "muted": "#5b6b75",
+        "faint": "#94a1ab",
+        "dim": "#3e4c56",
+        "primary": "#00838c",
+        "primary_hover": "#006970",
+        "primary_soft": "#dff6f8",
+        "primary_line": "#9fdde2",
+        "button": "#00838c",
         "button_text": "#ffffff",
-        "green": "#047857",
-        "green_soft": "#e3f8ef",
-        "amber": "#b45309",
-        "amber_soft": "#fff1e2",
-        "red": "#d6204a",
-        "red_soft": "#ffedf1",
-        "red_hover": "#ffd9e1",
-        "red_line": "#f5b5c3",
-        "row_alt": "#f8f8fb",
-        "row_low": "#fff2f5",
-        "selected": "#e9e1ff",
+        "secondary": "#7b2fc0",
+        "secondary_soft": "#f1e6fb",
+        "green": "#00838c",
+        "green_soft": "#dff6f8",
+        "amber": "#a85d00",
+        "amber_soft": "#fff1dc",
+        "red": "#c62828",
+        "red_strong": "#c62828",
+        "red_soft": "#fdecec",
+        "red_hover": "#fadada",
+        "red_line": "#f2b8ba",
+        "row_alt": "#f7f9fb",
+        "row_low": "#fff7ea",
+        "row_out": "#fdf0f0",
+        "selected": "#d2f1f4",
     },
 }
 
@@ -94,19 +111,23 @@ def set_mode(mode):
         pass
 
 
-FONT_CHOICES = ("Segoe UI Variable Text", "Segoe UI", "Inter", "SF Pro Text", "Helvetica Neue", "Helvetica")
-MONO_CHOICES = ("Cascadia Mono", "Consolas", "SF Mono", "Menlo", "JetBrains Mono", "DejaVu Sans Mono", "Courier")
+# Plain, formal fonts. Segoe UI is the normal Windows font; the others are for Mac and Linux.
+FONT_CHOICES = ("Segoe UI", "Open Sans", "Helvetica Neue", "Arial", "Liberation Sans", "Helvetica")
+# Only used to show SQL code in the Database Records window.
+CODE_CHOICES = ("Consolas", "Menlo", "Liberation Mono", "Courier New", "Courier")
 
 FONT = "Helvetica"
-MONO = "Courier"
+TITLE = FONT
+CODE = "Courier"
 
 
 def load_fonts(root):
-    """Pick the nicest font that is installed on this computer."""
-    global FONT, MONO
+    """Pick the fonts that are available on this computer."""
+    global TITLE, FONT, CODE
     installed = set(tkfont.families(root))
     FONT = next((name for name in FONT_CHOICES if name in installed), FONT)
-    MONO = next((name for name in MONO_CHOICES if name in installed), MONO)
+    TITLE = FONT
+    CODE = next((name for name in CODE_CHOICES if name in installed), CODE)
 
 
 def apply_ttk_theme(root):
@@ -121,7 +142,7 @@ def apply_ttk_theme(root):
         fieldbackground=COLORS["card"],
         foreground=COLORS["text"],
         rowheight=34,
-        font=(MONO, 9),
+        font=(FONT, 10),
         borderwidth=0,
         relief=tk.FLAT,
     )
@@ -133,28 +154,29 @@ def apply_ttk_theme(root):
     style.configure(
         "Treeview.Heading",
         background=COLORS["card_high"],
-        foreground=COLORS["muted"],
-        font=(MONO, 8, "bold"),
+        foreground=COLORS["dim"],
+        font=(FONT, 9, "bold"),
         relief=tk.FLAT,
         borderwidth=0,
-        padding=(8, 8),
+        padding=(10, 8),
     )
     style.map(
         "Treeview.Heading",
-        background=[("active", COLORS["line"])],
+        background=[("active", COLORS["card_top"])],
         foreground=[("active", COLORS["primary"])],
     )
     style.layout("Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
 
     style.configure(
         "Vertical.TScrollbar",
-        background=COLORS["line"],
+        background=COLORS["card_high"],
         troughcolor=COLORS["card"],
         bordercolor=COLORS["card"],
         arrowcolor=COLORS["muted"],
-        lightcolor=COLORS["line"],
-        darkcolor=COLORS["line"],
+        lightcolor=COLORS["card_high"],
+        darkcolor=COLORS["card_high"],
         gripcount=0,
+        arrowsize=11,
     )
     style.map("Vertical.TScrollbar", background=[("active", COLORS["primary"])])
 
@@ -162,15 +184,15 @@ def apply_ttk_theme(root):
         "TCombobox",
         fieldbackground=COLORS["input"],
         background=COLORS["card_high"],
-        foreground=COLORS["strong"],
+        foreground=COLORS["text"],
         arrowcolor=COLORS["primary"],
-        bordercolor=COLORS["line"],
+        bordercolor=COLORS["line_high"],
         lightcolor=COLORS["input"],
         darkcolor=COLORS["input"],
         selectbackground=COLORS["input"],
-        selectforeground=COLORS["strong"],
-        insertcolor=COLORS["strong"],
-        padding=(8, 5),
+        selectforeground=COLORS["text"],
+        insertcolor=COLORS["text"],
+        padding=(10, 6),
     )
     style.map(
         "TCombobox",
@@ -184,21 +206,21 @@ def apply_ttk_theme(root):
     root.option_add("*TCombobox*Listbox.background", COLORS["card_high"])
     root.option_add("*TCombobox*Listbox.foreground", COLORS["text"])
     root.option_add("*TCombobox*Listbox.selectBackground", COLORS["primary"])
-    root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
-    root.option_add("*TCombobox*Listbox.font", (MONO, 10))
+    root.option_add("*TCombobox*Listbox.selectForeground", COLORS["button_text"])
+    root.option_add("*TCombobox*Listbox.font", (FONT, 10))
     root.option_add("*TCombobox*Listbox.relief", "flat")
 
 
 class FlatButton(tk.Label):
     """A flat button with hover colors that looks the same on Windows, macOS, and Linux."""
 
-    def __init__(self, parent, text, command, bg, fg, hover_bg=None, font_size=9, padx=14, pady=8, border=None, hover_fg=None):
+    def __init__(self, parent, text, command, bg, fg, hover_bg=None, font_size=9, padx=14, pady=7, border=None, hover_fg=None, weight="bold", family=None):
         super().__init__(
             parent,
             text=text,
             bg=bg,
             fg=fg,
-            font=(MONO, font_size, "bold"),
+            font=(family or FONT, font_size, weight),
             padx=padx,
             pady=pady,
             cursor="hand2",
@@ -206,6 +228,7 @@ class FlatButton(tk.Label):
             highlightbackground=border or bg,
         )
         self.command = command
+        self.border = border or bg
         self.colors = (bg, fg, hover_bg or bg, hover_fg or fg)
         self.enabled = True
 
@@ -228,6 +251,6 @@ class FlatButton(tk.Label):
     def set_enabled(self, enabled):
         self.enabled = enabled
         if enabled:
-            self.configure(bg=self.colors[0], fg=self.colors[1], cursor="hand2")
+            self.configure(bg=self.colors[0], fg=self.colors[1], cursor="hand2", highlightbackground=self.border)
         else:
-            self.configure(bg=COLORS["card_high"], fg=COLORS["faint"], cursor="arrow")
+            self.configure(bg=COLORS["card_high"], fg=COLORS["faint"], cursor="arrow", highlightbackground=COLORS["line"])

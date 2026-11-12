@@ -1,5 +1,6 @@
 import re
 import sqlite3
+import sys
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox, ttk
@@ -13,20 +14,24 @@ CATEGORIES = ("School Supplies", "Food", "Drinks", "Cleaning", "Electronics", "O
 
 # Table column -> (heading, width, anchor, key used for sorting)
 TABLE_COLUMNS = {
-    "product_id": ("ID", 60, tk.W, "product_id"),
-    "product_name": ("PRODUCT", 190, tk.W, "product_name"),
-    "category": ("CATEGORY", 130, tk.W, "category"),
-    "quantity": ("STOCK", 70, tk.E, "quantity"),
-    "status": ("STATUS", 105, tk.W, "quantity"),
-    "unit_price": ("UNIT PRICE", 110, tk.E, "unit_price"),
-    "total": ("TOTAL AMOUNT", 130, tk.E, "total"),
+    "product_id": ("ID", 64, tk.W, "product_id"),
+    "product_name": ("Product", 210, tk.W, "product_name"),
+    "category": ("Category", 130, tk.W, "category"),
+    "quantity": ("Stock", 80, tk.E, "quantity"),
+    "status": ("Status", 120, tk.W, "quantity"),
+    "unit_price": ("Unit Price", 110, tk.E, "unit_price"),
+    "total": ("Total Amount", 130, tk.E, "total"),
 }
+
+TABLE_COLUMNS_BY_KEY = {sort_key: heading for heading, width, anchor, sort_key in TABLE_COLUMNS.values() if sort_key != "quantity" or heading == "Stock"}
 
 LOG_COLORS = {"BOOT": "primary", "ADD": "green", "RESTOCK": "green", "UPDATE": "primary", "DELETE": "red", "ALERT": "amber", "ERROR": "red", "THEME": "muted"}
 
 
-QUANTITY_PATTERN = re.compile(r"-?\d+")
-PRICE_PATTERN = re.compile(r"-?(\d+(\.\d{1,2})?|\.\d{1,2})")
+QUANTITY_PATTERN = re.compile(r"-?\d+", re.ASCII)
+PRICE_PATTERN = re.compile(r"-?(\d+(\.\d{1,2})?|\.\d{1,2})", re.ASCII)
+MAX_NAME_LENGTH = 60
+MAX_CATEGORY_LENGTH = 30
 
 
 def parse_quantity(text):
@@ -41,20 +46,33 @@ def parse_price(text):
     return float(text) if PRICE_PATTERN.fullmatch(text) else None
 
 
-def mono(size, weight="normal"):
-    return (theme.MONO, size, weight)
+def sans(size, weight="normal"):
+    return (theme.FONT, size, weight)
 
 
 def peso(amount):
     return f"PHP {amount:,.2f}"
 
 
+def short_list(products):
+    """Turn a list of products into a short line like "Floor Mop, Iced Tea 1L +2 more"."""
+    names = [p["product_name"] for p in products[:2]]
+    text = ", ".join(names)
+    if len(products) > 2:
+        text += f" +{len(products) - 2} more"
+    return text if len(text) <= 38 else text[:37] + "…"
+
+
 class InventoryApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Product Inventory System")
-        self.root.geometry("1320x760")
-        self.root.minsize(1180, 700)
+        self.root.geometry("1280x720")
+        self.root.minsize(1100, 660)
+        try:
+            self.root.state("zoomed")  # open maximized on Windows
+        except tk.TclError:
+            pass
 
         self.selected_product_id = None
         self.products = []
@@ -63,6 +81,9 @@ class InventoryApp:
         self.sort_reverse = True
         self.toast_job = None
         self.placeholder_trace = None
+        self.form_traces = []
+        self.health_ratio = 0.0
+        self.started_at = datetime.now().strftime("%I:%M %p").lstrip("0")
         self.log_entries = []
         self.viewer = None
 
@@ -78,10 +99,19 @@ class InventoryApp:
         self.row_count_var = tk.StringVar()
 
         self.total_value_var = tk.StringVar(value=peso(0))
-        self.total_products_var = tk.StringVar(value="0 PRODUCTS")
-        self.total_units_var = tk.StringVar(value="(0 UNITS)")
-        self.low_stock_var = tk.StringVar(value="0 ALERTS")
-        self.low_stock_detail_var = tk.StringVar(value="ALL STOCK LEVELS OK")
+        self.total_products_var = tk.StringVar(value="0")
+        self.total_units_var = tk.StringVar(value="0 units")
+        self.low_stock_var = tk.StringVar(value="0")
+        self.low_stock_detail_var = tk.StringVar(value="All stock levels are OK")
+        self.low_stock_unit_var = tk.StringVar(value=f"below {database.LOW_STOCK_THRESHOLD} pcs")
+        self.out_stock_var = tk.StringVar(value="0")
+        self.out_stock_detail_var = tk.StringVar(value="Nothing is out of stock")
+        self.out_stock_unit_var = tk.StringVar(value="need restock")
+        self.sidebar_records_var = tk.StringVar()
+        self.health_var = tk.StringVar(value="0%")
+        self.footer_var = tk.StringVar()
+        self.db_size_var = tk.StringVar(value="0 KB")
+        self.index_var = tk.StringVar()
 
         theme.load_fonts(self.root)
         theme.apply_ttk_theme(self.root)
@@ -102,192 +132,290 @@ class InventoryApp:
     # ------------------------------------------------------------------ layout
 
     def build_interface(self):
-        shell = tk.Frame(self.root, bg=COLORS["page"], padx=22, pady=16)
-        shell.pack(fill=tk.BOTH, expand=True)
+        self.build_sidebar()
 
-        self.build_header(shell)
+        body = tk.Frame(self.root, bg=COLORS["page"])
+        body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.build_header(body)
+        self.build_footer(body)
+
+        shell = tk.Frame(body, bg=COLORS["page"], padx=20, pady=14)
+        shell.pack(fill=tk.BOTH, expand=True)
         self.build_kpis(shell)
-        self.build_footer(shell)
 
         main = tk.Frame(shell, bg=COLORS["page"])
-        main.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
+        main.pack(fill=tk.BOTH, expand=True, pady=(14, 0))
         main.columnconfigure(0, weight=1)
         main.rowconfigure(0, weight=1)
 
         left = tk.Frame(main, bg=COLORS["page"])
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
-        right = tk.Frame(main, bg=COLORS["page"], width=360)
+        right = tk.Frame(main, bg=COLORS["page"], width=318)
         right.grid(row=0, column=1, sticky="ns")
+        right.pack_propagate(False)
 
-        self.build_filter_bar(left)
         self.build_bottom_row(left)
         self.build_table(left)
         self.build_form(right)
 
-        self.toast = tk.Label(self.root, bg=COLORS["card"], fg=COLORS["text"], font=mono(9, "bold"), padx=16, pady=10)
+        self.toast = tk.Frame(self.root, bg=COLORS["card"], highlightthickness=1, highlightbackground=COLORS["line_high"])
+        self.toast_stripe = tk.Frame(self.toast, width=3, bg=COLORS["primary"])
+        self.toast_stripe.pack(side=tk.LEFT, fill=tk.Y)
+        self.toast_label = tk.Label(self.toast, bg=COLORS["card"], fg=COLORS["text"], font=sans(10, "bold"), padx=14, pady=9)
+        self.toast_label.pack(side=tk.LEFT)
 
-    def panel(self, parent, accent=None, side="top"):
-        """A bordered panel with an optional 2px accent stripe on the top or left."""
+    # small building blocks
+
+    def panel(self, parent, padx=16, pady=14, bg=None):
+        """A dark card with a thin border."""
         outer = tk.Frame(parent, bg=COLORS["line"])
-        if accent:
-            stripe = tk.Frame(outer, bg=accent, height=2, width=2)
-            stripe.pack(side=tk.TOP if side == "top" else tk.LEFT, fill=tk.X if side == "top" else tk.Y)
-        inner = tk.Frame(outer, bg=COLORS["card"])
-        if side == "top" and accent:
-            inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=(0, 1))
-        elif accent:
-            inner.pack(fill=tk.BOTH, expand=True, padx=(0, 1), pady=1)
-        else:
-            inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+        inner = tk.Frame(outer, bg=bg or COLORS["card"], padx=padx, pady=pady)
+        inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
         return outer, inner
 
-    def build_header(self, parent):
-        header = tk.Frame(parent, bg=COLORS["page"])
-        header.pack(fill=tk.X)
+    def caps(self, parent, text, color=None, bg=None, size=7, weight="bold", **options):
+        """Small grey label used above values and boxes."""
+        return tk.Label(parent, text=text, bg=bg or COLORS["card"], fg=color or COLORS["muted"], font=sans(size + 1, weight), **options)
 
-        logo = tk.Canvas(header, width=40, height=40, bg=COLORS["page"], highlightthickness=0)
-        logo.pack(side=tk.LEFT)
-        logo.create_oval(2, 2, 38, 38, outline=COLORS["strong"], width=1)
-        star = (20, 7, 23, 16, 32, 16, 25, 22, 28, 31, 20, 25, 12, 31, 15, 22, 8, 16, 17, 16)
-        logo.create_polygon(star, fill=COLORS["primary"], outline="")
-
-        names = tk.Frame(header, bg=COLORS["page"])
-        names.pack(side=tk.LEFT, padx=(12, 0))
-        title = tk.Frame(names, bg=COLORS["page"])
-        title.pack(anchor=tk.W)
-        tk.Label(title, text="PRODUCT INVENTORY", bg=COLORS["page"], fg=COLORS["strong"], font=mono(16, "bold")).pack(side=tk.LEFT)
-        tk.Label(title, text=" // IM102", bg=COLORS["page"], fg=COLORS["primary"], font=mono(11, "bold")).pack(side=tk.LEFT, pady=(4, 0))
-        tk.Label(
-            title,
-            text="SQLITE",
-            bg=COLORS["primary_soft"],
-            fg=COLORS["primary"],
-            font=mono(7, "bold"),
-            padx=6,
-            pady=1,
-            highlightthickness=1,
-            highlightbackground=COLORS["primary_line"],
-        ).pack(side=tk.LEFT, padx=(10, 0), pady=(3, 0))
-
-        subtitle = tk.Frame(names, bg=COLORS["page"])
-        subtitle.pack(anchor=tk.W, pady=(3, 0))
-        tk.Label(subtitle, text="REAL-TIME STOCK TRACKING & CRUD OPERATIONS", bg=COLORS["page"], fg=COLORS["muted"], font=mono(8)).pack(side=tk.LEFT)
-        tk.Label(subtitle, text="  |  ", bg=COLORS["page"], fg=COLORS["line_high"], font=mono(8)).pack(side=tk.LEFT)
-        tk.Label(subtitle, text="● DATABASE: LIVE", bg=COLORS["page"], fg=COLORS["green"], font=mono(8)).pack(side=tk.LEFT)
-
-        right = tk.Frame(header, bg=COLORS["page"])
-        right.pack(side=tk.RIGHT)
-
-        self.count_badge = tk.Label(
-            right,
-            text="00",
-            bg=COLORS["card"],
-            fg=COLORS["primary"],
-            font=mono(11, "bold"),
-            width=3,
-            pady=6,
-            highlightthickness=1,
-            highlightbackground=COLORS["line_high"],
+    def kbd(self, parent, text, bg=None):
+        """A small keyboard key hint, like [Ctrl+F]."""
+        return tk.Label(
+            parent, text=text, bg=COLORS["card_high"], fg=COLORS["muted"], font=sans(8), padx=4,
+            highlightthickness=1, highlightbackground=COLORS["line_high"],
         )
-        self.count_badge.pack(side=tk.RIGHT)
 
+    # left side bar
+
+    def build_sidebar(self):
+        bar = tk.Frame(self.root, bg=COLORS["sidebar"], width=214)
+        bar.pack(side=tk.LEFT, fill=tk.Y)
+        bar.pack_propagate(False)
+        tk.Frame(self.root, bg=COLORS["line"], width=1).pack(side=tk.LEFT, fill=tk.Y)
+
+        brand = tk.Frame(bar, bg=COLORS["sidebar"], padx=16, pady=14)
+        brand.pack(fill=tk.X)
+        logo = tk.Canvas(brand, width=34, height=34, bg=COLORS["sidebar"], highlightthickness=0)
+        logo.pack(side=tk.LEFT)
+        logo.create_rectangle(1, 1, 33, 33, fill=COLORS["card_high"], outline=COLORS["primary_line"])
+        logo.create_polygon(17, 7, 26, 12, 17, 17, 8, 12, fill=COLORS["primary"], outline="")
+        logo.create_polygon(8, 14, 16, 18, 16, 27, 8, 23, fill=COLORS["primary"], outline="")
+        logo.create_polygon(26, 14, 18, 18, 18, 27, 26, 23, fill=COLORS["primary_hover"], outline="")
+        names = tk.Frame(brand, bg=COLORS["sidebar"])
+        names.pack(side=tk.LEFT, padx=(10, 0))
+        tk.Label(names, text="IM102", bg=COLORS["sidebar"], fg=COLORS["strong"], font=sans(15, "bold")).pack(anchor=tk.W)
+        self.caps(names, "Product Inventory", bg=COLORS["sidebar"], size=7, weight="normal").pack(anchor=tk.W)
+
+        strip = tk.Frame(bar, bg=COLORS["card"], padx=14, pady=6)
+        strip.pack(fill=tk.X)
+        self.caps(strip, "inventory.db", color=COLORS["primary"], size=7).pack(side=tk.LEFT)
+        tk.Label(strip, textvariable=self.sidebar_records_var, bg=COLORS["card"], fg=COLORS["primary_hover"], font=sans(8, "bold")).pack(side=tk.RIGHT)
+
+        self.caps(bar, "Menu", bg=COLORS["sidebar"], size=7, padx=16, pady=10).pack(anchor=tk.W, pady=(8, 0))
+        menu = [
+            ("▦", "Inventory", None, True),
+            ("⛁", "Database Records", self.open_database_viewer, False),
+            ("+", "New Product", self.start_new_product, False),
+            ("☀" if theme.MODE == "dark" else "☾", "Light Mode" if theme.MODE == "dark" else "Dark Mode", self.toggle_theme, False),
+        ]
+        for icon, text, command, active in menu:
+            self.nav_item(bar, icon, text, command, active)
+
+        bottom = tk.Frame(bar, bg=COLORS["sidebar"], padx=12, pady=12)
+        bottom.pack(side=tk.BOTTOM, fill=tk.X)
+        box = tk.Frame(bottom, bg=COLORS["card"], padx=10, pady=8, highlightthickness=1, highlightbackground=COLORS["line"])
+        box.pack(fill=tk.X)
+        row = tk.Frame(box, bg=COLORS["card"])
+        row.pack(fill=tk.X)
+        self.caps(row, "SQLite engine").pack(side=tk.LEFT)
+        tk.Label(row, text=f"v{sqlite3.sqlite_version}", bg=COLORS["card"], fg=COLORS["primary_hover"], font=sans(8, "bold")).pack(side=tk.RIGHT)
+        row = tk.Frame(box, bg=COLORS["card"])
+        row.pack(fill=tk.X, pady=(6, 0))
+        tk.Label(row, text="Stock health", bg=COLORS["card"], fg=COLORS["dim"], font=sans(8)).pack(side=tk.LEFT)
+        tk.Label(row, textvariable=self.health_var, bg=COLORS["card"], fg=COLORS["text"], font=sans(8, "bold")).pack(side=tk.RIGHT)
+        self.health_bar = tk.Canvas(box, height=4, bg=COLORS["card_top"], highlightthickness=0)
+        self.health_bar.pack(fill=tk.X, pady=(5, 0))
+        self.health_bar.bind("<Configure>", lambda event: self.draw_health())
+        row = tk.Frame(bottom, bg=COLORS["sidebar"])
+        row.pack(fill=tk.X, pady=(8, 0))
+        self.caps(row, f"Python {sys.version_info.major}.{sys.version_info.minor} · Tkinter", bg=COLORS["sidebar"], weight="normal").pack(side=tk.LEFT)
+
+    def nav_item(self, parent, icon, text, command, active):
+        bg = COLORS["card_high"] if active else COLORS["sidebar"]
+        item = tk.Frame(parent, bg=bg, cursor="hand2")
+        item.pack(fill=tk.X, padx=10, pady=1)
+        tk.Frame(item, bg=COLORS["primary"] if active else bg, width=2).pack(side=tk.LEFT, fill=tk.Y)
+        icon_label = tk.Label(item, text="", bg=bg, width=1, pady=8)
+        icon_label.pack(side=tk.LEFT, padx=(4, 4))
+        text_label = tk.Label(item, text=text, bg=bg, fg=COLORS["strong"] if active else COLORS["dim"], font=sans(9, "bold" if active else "normal"))
+        text_label.pack(side=tk.LEFT)
+        widgets = (item, icon_label, text_label)
+        if command is not None:
+            def hover(color):
+                for widget in widgets:
+                    widget.configure(bg=color)
+            for widget in widgets:
+                widget.bind("<Button-1>", lambda event: command())
+                widget.bind("<Enter>", lambda event: hover(COLORS["card"]))
+                widget.bind("<Leave>", lambda event: hover(COLORS["sidebar"]))
+
+    def draw_health(self):
+        if not hasattr(self, "health_bar") or not self.health_bar.winfo_exists():
+            return
+        bar = self.health_bar
+        bar.delete("all")
+        width = max(bar.winfo_width(), 10)
+        bar.create_rectangle(0, 0, int(width * self.health_ratio), 4, fill=COLORS["primary"], outline="")
+
+    # top bar and footer
+
+    def build_header(self, parent):
+        header = tk.Frame(parent, bg=COLORS["header"], padx=20, height=56)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        tk.Frame(parent, bg=COLORS["line"], height=1).pack(fill=tk.X)
+
+        left = tk.Frame(header, bg=COLORS["header"])
+        left.pack(side=tk.LEFT, fill=tk.Y)
+        tk.Label(left, text="Product Inventory System", bg=COLORS["header"], fg=COLORS["strong"], font=sans(14, "bold")).pack(side=tk.LEFT)
+
+        pill = tk.Frame(left, bg=COLORS["card_high"], padx=8, pady=3, highlightthickness=1, highlightbackground=COLORS["line_high"])
+        pill.pack(side=tk.LEFT, padx=(16, 0))
+        tk.Label(pill, text="●", bg=COLORS["card_high"], fg=COLORS["primary"], font=sans(8)).pack(side=tk.LEFT)
+        tk.Label(pill, text=" Connected to inventory.db", bg=COLORS["card_high"], fg=COLORS["text"], font=sans(8)).pack(side=tk.LEFT)
+
+        right = tk.Frame(header, bg=COLORS["header"])
+        right.pack(side=tk.RIGHT, fill=tk.Y)
         FlatButton(
-            right,
-            "+  NEW PRODUCT",
-            self.start_new_product,
-            COLORS["primary_soft"],
-            COLORS["strong"],
-            COLORS["primary_line"],
-            border=COLORS["primary"],
-        ).pack(side=tk.RIGHT, padx=(0, 10))
-
+            right, "New Product", self.start_new_product, COLORS["button"], COLORS["button_text"], COLORS["primary_hover"],
+            font_size=8, pady=6, border=COLORS["button"],
+        ).pack(side=tk.RIGHT, pady=12)
         FlatButton(
-            right,
-            "▤  DB RECORDS",
-            self.open_database_viewer,
-            COLORS["card"],
-            COLORS["muted"],
-            COLORS["card_high"],
-            border=COLORS["line"],
-            hover_fg=COLORS["strong"],
-        ).pack(side=tk.RIGHT, padx=(0, 10))
-
-        toggle_text = "☀  LIGHT MODE" if theme.MODE == "dark" else "☾  DARK MODE"
+            right, "Database Records", self.open_database_viewer, COLORS["card_high"], COLORS["text"], COLORS["card_top"],
+            font_size=8, pady=6, border=COLORS["line_high"], hover_fg=COLORS["strong"],
+        ).pack(side=tk.RIGHT, padx=(0, 8), pady=12)
+        toggle_text = "Light Mode" if theme.MODE == "dark" else "Dark Mode"
         FlatButton(
-            right,
-            toggle_text,
-            self.toggle_theme,
-            COLORS["card"],
-            COLORS["muted"],
-            COLORS["card_high"],
-            border=COLORS["line"],
-            hover_fg=COLORS["strong"],
-        ).pack(side=tk.RIGHT, padx=(0, 10))
+            right, toggle_text, self.toggle_theme, COLORS["card_high"], COLORS["text"], COLORS["card_top"],
+            font_size=8, pady=6, border=COLORS["line_high"], hover_fg=COLORS["strong"],
+        ).pack(side=tk.RIGHT, padx=(0, 8), pady=12)
 
-        tk.Frame(parent, bg=COLORS["line"], height=1).pack(fill=tk.X, pady=(12, 0))
+    def build_footer(self, parent):
+        footer = tk.Frame(parent, bg=COLORS["sidebar"], padx=20, height=30)
+        footer.pack(side=tk.BOTTOM, fill=tk.X)
+        footer.pack_propagate(False)
+        tk.Frame(parent, bg=COLORS["line"], height=1).pack(side=tk.BOTTOM, fill=tk.X)
+
+        tk.Label(footer, textvariable=self.footer_var, bg=COLORS["sidebar"], fg=COLORS["muted"], font=sans(8)).pack(side=tk.LEFT)
+        shortcuts = tk.Frame(footer, bg=COLORS["sidebar"])
+        shortcuts.pack(side=tk.RIGHT)
+        self.caps(shortcuts, "Shortcuts:", bg=COLORS["sidebar"]).pack(side=tk.LEFT, padx=(0, 4))
+        for key, action in (("Enter", "Save"), ("Esc", "Clear"), ("Del", "Delete"), ("Ctrl+F", "Search"), ("Ctrl+L", "Theme")):
+            self.kbd(shortcuts, key).pack(side=tk.LEFT, padx=(8, 3))
+            tk.Label(shortcuts, text=action, bg=COLORS["sidebar"], fg=COLORS["dim"], font=sans(8)).pack(side=tk.LEFT)
+
+    # summary cards
 
     def build_kpis(self, parent):
         strip = tk.Frame(parent, bg=COLORS["page"])
-        strip.pack(fill=tk.X, pady=(12, 0))
-        for column in range(4):
+        strip.pack(fill=tk.X)
+        for column in range(5):
             strip.columnconfigure(column, weight=1, uniform="kpi")
 
         cards = [
-            ("TOTAL INVENTORY VALUE", "₱", COLORS["primary"], (self.total_value_var,), "QUANTITY × UNIT PRICE, ALL PRODUCTS", COLORS["muted"]),
-            ("REGISTERED PRODUCTS", "▦", COLORS["green"], (self.total_products_var, self.total_units_var), "100% SAVED TO DISK", COLORS["green"]),
-            ("LOW STOCK ALERT", "▲", COLORS["red"], (self.low_stock_var,), self.low_stock_detail_var, COLORS["red"]),
-            ("DATABASE", "⛁", COLORS["muted"], ("INVENTORY.DB",), f"SQLITE // LOW STOCK BELOW {database.LOW_STOCK_THRESHOLD} PCS", COLORS["muted"]),
+            ("Total Inventory Value", "₱", "secondary", self.total_value_var, None, "Quantity × unit price, all products", "muted"),
+            ("Registered Products", "▦", "primary", self.total_products_var, self.total_units_var, "● Saved in inventory.db", "primary"),
+            ("Low Stock Alerts", "▲", "amber", self.low_stock_var, self.low_stock_unit_var, self.low_stock_detail_var, "amber"),
+            ("Out of Stock", "⊘", "red", self.out_stock_var, self.out_stock_unit_var, self.out_stock_detail_var, "red"),
+            ("SQLite Database", "⛁", "primary", self.db_size_var, None, f"products table · SQLite v{sqlite3.sqlite_version}", "muted"),
         ]
 
-        for index, (title, icon, accent, values, note, note_color) in enumerate(cards):
-            outer, card = self.panel(strip, accent, side="left")
+        for index, (label, icon, color, value, extra, note, note_color) in enumerate(cards):
+            outer, card = self.panel(strip, padx=14, pady=10)
             outer.grid(row=0, column=index, sticky="ew", padx=(0 if index == 0 else 10, 0))
-            card.configure(padx=12, pady=9)
 
             top = tk.Frame(card, bg=COLORS["card"])
             top.pack(fill=tk.X)
-            tk.Label(top, text=title, bg=COLORS["card"], fg=COLORS["muted"], font=mono(8)).pack(side=tk.LEFT)
-            tk.Label(top, text=icon, bg=COLORS["card"], fg=accent, font=mono(10, "bold")).pack(side=tk.RIGHT)
+            self.caps(top, label).pack(side=tk.LEFT)
 
-            value_row = tk.Frame(card, bg=COLORS["card"])
-            value_row.pack(fill=tk.X, pady=(3, 0))
-            value_color = COLORS["red"] if accent == COLORS["red"] else COLORS["strong"]
-            for position, value in enumerate(values):
-                options = {"textvariable": value} if isinstance(value, tk.StringVar) else {"text": value}
-                if position == 0:
-                    tk.Label(value_row, bg=COLORS["card"], fg=value_color, font=mono(13, "bold"), **options).pack(side=tk.LEFT)
-                else:
-                    tk.Label(value_row, bg=COLORS["card"], fg=COLORS["muted"], font=mono(9), **options).pack(side=tk.LEFT, padx=(8, 0), pady=(3, 0))
+            row = tk.Frame(card, bg=COLORS["card"])
+            row.pack(fill=tk.X, pady=(2, 0))
+            value_color = COLORS["strong"] if color in ("primary", "secondary") else COLORS[color]
+            tk.Label(row, textvariable=value, bg=COLORS["card"], fg=value_color, font=sans(17, "bold")).pack(side=tk.LEFT)
+            if extra is not None:
+                tk.Label(row, textvariable=extra, bg=COLORS["card"], fg=COLORS["muted"], font=sans(8)).pack(side=tk.LEFT, padx=(6, 0), pady=(7, 0))
 
             note_options = {"textvariable": note} if isinstance(note, tk.StringVar) else {"text": note}
-            tk.Label(card, bg=COLORS["card"], fg=note_color, font=mono(7), anchor=tk.W, **note_options).pack(fill=tk.X, pady=(2, 0))
+            tk.Label(card, bg=COLORS["card"], fg=COLORS[note_color], font=sans(8), anchor=tk.W, **note_options).pack(fill=tk.X)
 
-    def build_filter_bar(self, parent):
-        bar = tk.Frame(parent, bg=COLORS["page"])
-        bar.pack(fill=tk.X)
+    # product table
 
-        self.chip_frame = tk.Frame(bar, bg=COLORS["page"])
-        self.chip_frame.pack(side=tk.LEFT)
+    def build_table(self, parent):
+        outer, card = self.panel(parent, padx=0, pady=0)
+        outer.pack(fill=tk.BOTH, expand=True)
 
-        search_box = tk.Frame(bar, bg=COLORS["input"], highlightthickness=1, highlightbackground=COLORS["line"])
+        top = tk.Frame(card, bg=COLORS["card"], padx=16, pady=10)
+        top.pack(fill=tk.X)
+        tk.Label(top, text="Product List", bg=COLORS["card"], fg=COLORS["strong"], font=sans(14, "bold")).pack(side=tk.LEFT)
+        tk.Label(
+            top, textvariable=self.row_count_var, bg=COLORS["primary_soft"], fg=COLORS["primary"], font=sans(8, "bold"), padx=6, pady=2,
+        ).pack(side=tk.LEFT, padx=(10, 0))
+
+        search_box = tk.Frame(top, bg=COLORS["input"], highlightthickness=1, highlightbackground=COLORS["line_high"])
         search_box.pack(side=tk.RIGHT)
-        tk.Label(search_box, text="⌕", bg=COLORS["input"], fg=COLORS["primary"], font=mono(11)).pack(side=tk.RIGHT, padx=(2, 8))
+        tk.Label(search_box, text="⌕", bg=COLORS["input"], fg=COLORS["muted"], font=sans(11)).pack(side=tk.LEFT, padx=(8, 0))
         self.search_entry = tk.Entry(
             search_box,
             textvariable=self.search_var,
-            width=26,
+            width=28,
             bg=COLORS["input"],
-            fg=COLORS["strong"],
-            insertbackground=COLORS["strong"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["primary"],
             relief=tk.FLAT,
             bd=0,
             highlightthickness=0,
-            font=mono(9),
+            font=sans(9),
         )
-        self.search_entry.pack(side=tk.LEFT, ipady=6, padx=(10, 2))
-        self.add_placeholder(self.search_entry, self.search_var, "SEARCH ID, NAME, CATEGORY...")
+        self.search_entry.pack(side=tk.LEFT, ipady=5, padx=(4, 6))
+        self.kbd(search_box, "Ctrl+F").pack(side=tk.LEFT, padx=(0, 6))
+        self.add_placeholder(self.search_entry, self.search_var, "Search by ID, name, or category...")
         self.search_entry.bind("<FocusIn>", lambda e: search_box.configure(highlightbackground=COLORS["primary"]), add="+")
-        self.search_entry.bind("<FocusOut>", lambda e: search_box.configure(highlightbackground=COLORS["line"]), add="+")
+        self.search_entry.bind("<FocusOut>", lambda e: search_box.configure(highlightbackground=COLORS["line_high"]), add="+")
+
+        self.chip_frame = tk.Frame(card, bg=COLORS["card"], padx=16)
+        self.chip_frame.pack(fill=tk.X, pady=(0, 10))
+
+        table_area = tk.Frame(card, bg=COLORS["card"])
+        table_area.pack(fill=tk.BOTH, expand=True)
+        table_area.rowconfigure(0, weight=1)
+        table_area.columnconfigure(0, weight=1)
+
+        columns = tuple(TABLE_COLUMNS)
+        self.tree = ttk.Treeview(table_area, columns=columns, show="headings", selectmode="browse")
+        for column, (heading, width, anchor, sort_key) in TABLE_COLUMNS.items():
+            command = (lambda key=sort_key: self.sort_by(key)) if sort_key else ""
+            self.tree.heading(column, text=heading, anchor=anchor, command=command)
+            self.tree.column(column, width=width, minwidth=40, anchor=anchor, stretch=False)
+
+        scrollbar = ttk.Scrollbar(table_area, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        footer = tk.Frame(card, bg=COLORS["card_high"], padx=16, pady=5)
+        footer.pack(fill=tk.X)
+        tk.Label(footer, textvariable=self.index_var, bg=COLORS["card_high"], fg=COLORS["muted"], font=sans(8)).pack(side=tk.LEFT)
+        self.caps(footer, "Click a row to edit it  ·  Click a heading to sort", color=COLORS["primary"], bg=COLORS["card_high"]).pack(side=tk.RIGHT)
+
+        self.empty_label = tk.Label(table_area, bg=COLORS["card"], fg=COLORS["muted"], font=sans(10), justify=tk.CENTER)
+
+        self.tree.tag_configure("even", background=COLORS["card"])
+        self.tree.tag_configure("odd", background=COLORS["row_alt"])
+        self.tree.tag_configure("low", background=COLORS["row_low"], foreground=COLORS["amber"])
+        self.tree.tag_configure("out", background=COLORS["row_out"], foreground=COLORS["red"])
+
+        self.tree.bind("<<TreeviewSelect>>", self.load_selected_product)
+        self.tree.bind("<Delete>", lambda event: self.delete_product())
+        self.tree.bind("<Configure>", self.fit_columns)
 
     def render_chips(self):
         for widget in self.chip_frame.winfo_children():
@@ -305,22 +433,22 @@ class InventoryApp:
             active = category == self.category_filter
             chip = FlatButton(
                 self.chip_frame,
-                f"{category.upper()} [{count}]",
+                f"{category} ({count})",
                 lambda value=category: self.set_category_filter(value),
-                COLORS["primary_soft"] if active else COLORS["card"],
-                COLORS["strong"] if active else COLORS["muted"],
-                COLORS["primary_soft"] if active else COLORS["card_high"],
-                font_size=8,
+                COLORS["primary"] if active else COLORS["card_high"],
+                COLORS["button_text"] if active else COLORS["dim"],
+                COLORS["primary_hover"] if active else COLORS["card_top"],
+                font_size=7,
                 padx=9,
                 pady=4,
                 border=COLORS["primary"] if active else COLORS["line"],
-                hover_fg=COLORS["strong"],
+                hover_fg=COLORS["button_text"] if active else COLORS["strong"],
             )
             chip.pack(side=tk.LEFT, padx=(0, 6))
 
     def add_placeholder(self, entry, variable, text):
         """Show grey hint text inside an empty entry box."""
-        hint = tk.Label(entry, text=text, bg=COLORS["input"], fg=COLORS["faint"], font=mono(9), cursor="xterm")
+        hint = tk.Label(entry, text=text, bg=COLORS["input"], fg=COLORS["faint"], font=sans(9), cursor="xterm")
 
         def update(*args):
             if variable.get() or entry.focus_get() == entry:
@@ -331,42 +459,12 @@ class InventoryApp:
         hint.bind("<Button-1>", lambda e: entry.focus_set())
         entry.bind("<FocusIn>", update, add="+")
         entry.bind("<FocusOut>", update, add="+")
-        self.placeholder_trace = variable.trace_add("write", update)
+        trace = variable.trace_add("write", update)
+        if variable is self.search_var:
+            self.placeholder_trace = trace
+        else:
+            self.form_traces.append((variable, trace))
         update()
-
-    def build_table(self, parent):
-        outer, table_card = self.panel(parent)
-        outer.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-        table_card.rowconfigure(0, weight=1)
-        table_card.columnconfigure(0, weight=1)
-
-        columns = tuple(TABLE_COLUMNS)
-        self.tree = ttk.Treeview(table_card, columns=columns, show="headings", selectmode="browse")
-        for column, (heading, width, anchor, sort_key) in TABLE_COLUMNS.items():
-            self.tree.heading(column, text=heading, anchor=anchor, command=lambda key=sort_key: self.sort_by(key))
-            self.tree.column(column, width=width, minwidth=40, anchor=anchor, stretch=False)
-
-        scrollbar = ttk.Scrollbar(table_card, orient=tk.VERTICAL, command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
-
-        footer = tk.Frame(table_card, bg=COLORS["card_high"], padx=10, pady=5)
-        footer.grid(row=1, column=0, columnspan=2, sticky="ew")
-        tk.Label(footer, textvariable=self.row_count_var, bg=COLORS["card_high"], fg=COLORS["muted"], font=mono(7)).pack(side=tk.LEFT)
-        tk.Label(footer, text="  |  CLICK A ROW TO EDIT · CLICK A HEADING TO SORT", bg=COLORS["card_high"], fg=COLORS["faint"], font=mono(7)).pack(side=tk.LEFT)
-        tk.Label(footer, text="● AUTO-CALCULATIONS ON", bg=COLORS["card_high"], fg=COLORS["green"], font=mono(7)).pack(side=tk.RIGHT)
-
-        self.empty_label = tk.Label(table_card, bg=COLORS["card"], fg=COLORS["muted"], font=mono(9), justify=tk.CENTER)
-
-        self.tree.tag_configure("even", background=COLORS["card"])
-        self.tree.tag_configure("odd", background=COLORS["row_alt"])
-        self.tree.tag_configure("low", foreground=COLORS["amber"])
-        self.tree.tag_configure("out", foreground=COLORS["red"], background=COLORS["row_low"])
-
-        self.tree.bind("<<TreeviewSelect>>", self.load_selected_product)
-        self.tree.bind("<Delete>", lambda event: self.delete_product())
-        self.tree.bind("<Configure>", self.fit_columns)
 
     def fit_columns(self, event):
         """Stretch or shrink the columns so the table always fits without side scrolling."""
@@ -374,91 +472,94 @@ class InventoryApp:
         for column, (heading, width, anchor, sort_key) in TABLE_COLUMNS.items():
             self.tree.column(column, width=int(width * event.width / base_total))
 
+    # activity log and product inspector
+
     def build_bottom_row(self, parent):
-        row = tk.Frame(parent, bg=COLORS["page"])
-        row.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
-        row.columnconfigure(0, weight=3, uniform="bottom")
-        row.columnconfigure(1, weight=2, uniform="bottom")
+        row = tk.Frame(parent, bg=COLORS["page"], height=176)
+        row.pack(side=tk.BOTTOM, fill=tk.X, pady=(14, 0))
+        row.grid_propagate(False)
+        row.columnconfigure(0, weight=1, uniform="bottom")
+        row.columnconfigure(1, weight=1, uniform="bottom")
+        row.rowconfigure(0, weight=1)
 
         # Activity log
-        outer, log_card = self.panel(row)
-        outer.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        log_card.configure(padx=10, pady=8)
+        outer, log_card = self.panel(row, padx=14, pady=10)
+        outer.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
         top = tk.Frame(log_card, bg=COLORS["card"])
         top.pack(fill=tk.X)
-        tk.Label(top, text="[ACTIVITY LOG]", bg=COLORS["card"], fg=COLORS["primary"], font=mono(8, "bold")).pack(side=tk.LEFT)
-        tk.Label(top, text="THIS SESSION", bg=COLORS["card"], fg=COLORS["faint"], font=mono(7)).pack(side=tk.RIGHT)
+        self.caps(top, "Activity Log", color=COLORS["primary"], size=8).pack(side=tk.LEFT)
+        self.caps(top, "This session", weight="normal").pack(side=tk.RIGHT)
 
         self.log_box = tk.Text(
             log_card,
-            height=6,
-            bg=COLORS["page"],
-            fg=COLORS["muted"],
-            font=mono(8),
+            height=4,
+            bg=COLORS["card"],
+            fg=COLORS["dim"],
+            font=sans(9),
             relief=tk.FLAT,
             bd=0,
-            highlightthickness=1,
-            highlightbackground=COLORS["line"],
-            padx=8,
+            highlightthickness=0,
+            padx=0,
             pady=6,
             wrap=tk.WORD,
             cursor="arrow",
+            spacing1=1,
+            spacing3=1,
         )
-        self.log_box.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+        self.log_box.pack(fill=tk.BOTH, expand=True)
         for name in set(LOG_COLORS.values()):
-            self.log_box.tag_configure(name, foreground=COLORS[name])
+            self.log_box.tag_configure(name, foreground=COLORS[name], font=sans(9, "bold"))
         self.log_box.tag_configure("time", foreground=COLORS["faint"])
         self.log_box.configure(state=tk.DISABLED)
         for entry in self.log_entries:
             self.write_log_line(*entry)
 
-        # Inspector
-        outer, inspector = self.panel(row)
+        # Product inspector
+        outer, inspector = self.panel(row, padx=14, pady=10)
         outer.grid(row=0, column=1, sticky="nsew")
-        inspector.configure(padx=10, pady=8)
         top = tk.Frame(inspector, bg=COLORS["card"])
         top.pack(fill=tk.X)
-        tk.Label(top, text="[PRODUCT INSPECTOR]", bg=COLORS["card"], fg=COLORS["muted"], font=mono(8, "bold")).pack(side=tk.LEFT)
-        self.inspect_pill = tk.Label(top, bg=COLORS["card"], font=mono(7, "bold"))
+        self.caps(top, "Product Details", color=COLORS["primary"], size=8).pack(side=tk.LEFT)
+        self.inspect_pill = tk.Label(top, bg=COLORS["card"], font=sans(8, "bold"), padx=6, pady=1)
         self.inspect_pill.pack(side=tk.RIGHT)
 
-        box = tk.Frame(inspector, bg=COLORS["page"], highlightthickness=1, highlightbackground=COLORS["line"], padx=10, pady=8)
-        box.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+        self.ins_name = tk.Label(inspector, bg=COLORS["card"], fg=COLORS["strong"], font=sans(13, "bold"), anchor=tk.W)
+        self.ins_name.pack(fill=tk.X, pady=(6, 0))
+        self.ins_id = tk.Label(inspector, bg=COLORS["card"], fg=COLORS["muted"], font=sans(8), anchor=tk.W)
+        self.ins_id.pack(fill=tk.X)
 
-        heading = tk.Frame(box, bg=COLORS["page"])
-        heading.pack(fill=tk.X)
-        names = tk.Frame(heading, bg=COLORS["page"])
-        names.pack(side=tk.LEFT)
-        self.ins_name = tk.Label(names, bg=COLORS["page"], fg=COLORS["strong"], font=mono(9, "bold"), anchor=tk.W)
-        self.ins_name.pack(anchor=tk.W)
-        self.ins_id = tk.Label(names, bg=COLORS["page"], fg=COLORS["muted"], font=mono(7), anchor=tk.W)
-        self.ins_id.pack(anchor=tk.W)
-        self.ins_price = tk.Label(heading, bg=COLORS["page"], fg=COLORS["primary"], font=mono(9, "bold"))
-        self.ins_price.pack(side=tk.RIGHT, anchor=tk.N)
+        tiles = tk.Frame(inspector, bg=COLORS["card"])
+        tiles.pack(fill=tk.X, pady=(6, 0))
+        self.ins_tiles = {}
+        for column, name in enumerate(("Stock", "Unit Price", "Total Value", "Status")):
+            tiles.columnconfigure(column, weight=1, uniform="tiles")
+            tile = tk.Frame(tiles, bg=COLORS["card_high"], padx=7, pady=4)
+            tile.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 4, 0))
+            self.caps(tile, name, bg=COLORS["card_high"], size=6, weight="normal").pack(anchor=tk.W)
+            value = tk.Label(tile, text="--", bg=COLORS["card_high"], fg=COLORS["text"], font=sans(9, "bold"), anchor=tk.W)
+            value.pack(anchor=tk.W)
+            self.ins_tiles[name] = value
 
-        self.stock_meter = tk.Canvas(box, height=22, bg=COLORS["page"], highlightthickness=0)
-        self.stock_meter.pack(fill=tk.X, pady=(6, 4))
+        self.stock_meter = tk.Canvas(inspector, height=12, bg=COLORS["card"], highlightthickness=0)
+        self.stock_meter.pack(fill=tk.X, pady=(6, 0))
         self.stock_meter.bind("<Configure>", lambda event: self.update_inspector())
 
-        self.ins_details = tk.Label(box, bg=COLORS["page"], fg=COLORS["muted"], font=mono(7), justify=tk.LEFT, anchor=tk.W)
-        self.ins_details.pack(fill=tk.X)
+    # product form
 
     def build_form(self, parent):
-        outer, form = self.panel(parent, COLORS["primary"])
+        outer, form = self.panel(parent, padx=16, pady=14)
         outer.pack(fill=tk.BOTH, expand=True)
-        form.configure(padx=16, pady=14)
 
         header = tk.Frame(form, bg=COLORS["card"])
         header.pack(fill=tk.X)
-        titles = tk.Frame(header, bg=COLORS["card"])
-        titles.pack(side=tk.LEFT)
-        tk.Label(titles, text="●  PRODUCT CONTROL PANEL", bg=COLORS["card"], fg=COLORS["strong"], font=mono(10, "bold")).pack(anchor=tk.W)
-        self.form_subtitle = tk.Label(titles, bg=COLORS["card"], fg=COLORS["muted"], font=mono(7))
-        self.form_subtitle.pack(anchor=tk.W, pady=(2, 0))
-        self.mode_badge = tk.Label(header, font=mono(7, "bold"), padx=7, pady=2, highlightthickness=1)
-        self.mode_badge.pack(side=tk.RIGHT, anchor=tk.N)
+        self.mode_badge = tk.Label(header, font=sans(8, "bold"), padx=6, pady=1)
+        self.mode_badge.pack(side=tk.RIGHT, anchor=tk.N, pady=(4, 0))
+        self.form_title = tk.Label(header, text="Add a Product", bg=COLORS["card"], fg=COLORS["strong"], font=sans(15, "bold"))
+        self.form_title.pack(anchor=tk.W)
+        self.form_subtitle = tk.Label(form, bg=COLORS["card"], fg=COLORS["muted"], font=sans(8), anchor=tk.W, justify=tk.LEFT, wraplength=280)
+        self.form_subtitle.pack(fill=tk.X)
 
-        self.name_entry = self.create_input(form, "PRODUCT NAME", self.product_name_var)
+        self.name_entry = self.create_input(form, "Product Name", self.product_name_var, required=True, hint="e.g. Bottled Water 500ml")
         self.create_category_input(form)
 
         numbers = tk.Frame(form, bg=COLORS["card"])
@@ -468,98 +569,114 @@ class InventoryApp:
         quantity_box.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         price_box = tk.Frame(numbers, bg=COLORS["card"])
         price_box.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        self.quantity_entry = self.create_input(quantity_box, "QUANTITY (PCS)", self.quantity_var, width=10)
-        self.price_entry = self.create_input(price_box, "UNIT PRICE (PHP)", self.unit_price_var, width=10)
+        self.quantity_entry = self.create_input(quantity_box, "Quantity (pcs)", self.quantity_var, width=8, hint="0")
+        self.price_entry = self.create_input(price_box, "Unit Price (PHP)", self.unit_price_var, width=8, prefix="₱", hint="0.00")
 
-        total_box = tk.Frame(form, bg=COLORS["primary_soft"], padx=12, pady=9, highlightthickness=1, highlightbackground=COLORS["primary_line"])
-        total_box.pack(fill=tk.X, pady=(14, 0))
-        tk.Label(total_box, text="COMPUTED TOTAL:", bg=COLORS["primary_soft"], fg=COLORS["muted"], font=mono(8)).pack(side=tk.LEFT)
-        tk.Label(total_box, textvariable=self.item_total_var, bg=COLORS["primary_soft"], fg=COLORS["primary"], font=mono(11, "bold")).pack(side=tk.RIGHT)
+        total_box = tk.Frame(form, bg=COLORS["card_high"], padx=12, pady=8, highlightthickness=1, highlightbackground=COLORS["line_high"])
+        total_box.pack(fill=tk.X, pady=(12, 0))
+        labels = tk.Frame(total_box, bg=COLORS["card_high"])
+        labels.pack(side=tk.LEFT)
+        self.caps(labels, "Item Total", bg=COLORS["card_high"]).pack(anchor=tk.W)
+        tk.Label(labels, text="Qty × Unit Price", bg=COLORS["card_high"], fg=COLORS["dim"], font=sans(8)).pack(anchor=tk.W)
+        tk.Label(total_box, textvariable=self.item_total_var, bg=COLORS["card_high"], fg=COLORS["secondary"], font=sans(16, "bold")).pack(side=tk.RIGHT)
 
-        tk.Label(
+        self.error_label = tk.Label(
             form,
             textvariable=self.error_var,
-            bg=COLORS["card"],
+            bg=COLORS["red_soft"],
             fg=COLORS["red"],
-            font=mono(8, "bold"),
-            wraplength=310,
+            font=sans(9, "bold"),
+            wraplength=270,
             justify=tk.LEFT,
-        ).pack(anchor=tk.W, pady=(6, 4))
+            anchor=tk.W,
+            padx=10,
+            pady=6,
+        )
+        self.error_var.trace_add("write", self.show_or_hide_error)
+
+        note = tk.Label(form, text="Every change is saved to inventory.db right away.", bg=COLORS["card"], fg=COLORS["faint"], font=sans(8), anchor=tk.W)
+        note.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
 
         buttons = tk.Frame(form, bg=COLORS["card"])
         buttons.pack(fill=tk.X, side=tk.BOTTOM)
         buttons.columnconfigure((0, 1), weight=1, uniform="buttons")
 
         self.add_button = FlatButton(
-            buttons, "✓  ADD PRODUCT", self.add_product, COLORS["button"], COLORS["button_text"], COLORS["primary"], pady=10, hover_fg="#ffffff"
+            buttons, "Add Product", self.add_product, COLORS["button"], COLORS["button_text"], COLORS["primary_hover"],
+            font_size=9, pady=9, border=COLORS["button"],
         )
-        self.add_button.grid(row=0, column=0, sticky="ew", padx=(0, 4), pady=(0, 8))
+        self.add_button.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         self.update_button = FlatButton(
-            buttons, "⟳  UPDATE", self.update_product, COLORS["card_high"], COLORS["text"], COLORS["line"], pady=10, border=COLORS["line_high"], hover_fg=COLORS["strong"]
+            buttons, "Update", self.update_product, COLORS["card_high"], COLORS["strong"], COLORS["card_top"], font_size=8, border=COLORS["line_high"]
         )
-        self.update_button.grid(row=0, column=1, sticky="ew", padx=(4, 0), pady=(0, 8))
+        self.update_button.grid(row=1, column=0, sticky="ew", padx=(0, 3), pady=(0, 6))
         self.delete_button = FlatButton(
-            buttons, "✕  DELETE", self.delete_product, COLORS["red_soft"], COLORS["red"], COLORS["red_hover"], font_size=8, border=COLORS["red_line"]
+            buttons, "Delete", self.delete_product, COLORS["red_soft"], COLORS["red"], COLORS["red_hover"], font_size=8, border=COLORS["red_line"]
         )
-        self.delete_button.grid(row=1, column=0, sticky="ew", padx=(0, 4))
+        self.delete_button.grid(row=1, column=1, sticky="ew", padx=(3, 0), pady=(0, 6))
         FlatButton(
-            buttons, "⌫  CLEAR FIELDS", self.clear_fields, COLORS["card"], COLORS["muted"], COLORS["card_high"], font_size=8, border=COLORS["line"], hover_fg=COLORS["strong"]
-        ).grid(row=1, column=1, sticky="ew", padx=(4, 0))
+            buttons, "Clear Fields", self.clear_fields, COLORS["card"], COLORS["dim"], COLORS["card_high"], font_size=8,
+            border=COLORS["line"], hover_fg=COLORS["strong"],
+        ).grid(row=2, column=0, columnspan=2, sticky="ew")
 
-    def create_input(self, parent, label, variable, width=30):
+    def show_or_hide_error(self, *args):
+        if self.error_var.get():
+            self.error_label.pack(fill=tk.X, pady=(10, 0))
+        else:
+            self.error_label.pack_forget()
+
+    def create_input(self, parent, label, variable, width=30, required=False, prefix=None, hint=None):
         wrapper = tk.Frame(parent, bg=COLORS["card"])
-        wrapper.pack(fill=tk.X, pady=(12, 0))
+        wrapper.pack(fill=tk.X, pady=(10, 0))
 
-        tk.Label(wrapper, text=label, bg=COLORS["card"], fg=COLORS["muted"], font=mono(8)).pack(anchor=tk.W)
+        top = tk.Frame(wrapper, bg=COLORS["card"])
+        top.pack(fill=tk.X)
+        self.caps(top, label, color=COLORS["dim"]).pack(side=tk.LEFT)
+        if required:
+            self.caps(top, "Required", color=COLORS["faint"], weight="normal").pack(side=tk.RIGHT)
+
+        box = tk.Frame(wrapper, bg=COLORS["input"], highlightthickness=1, highlightbackground=COLORS["line_high"])
+        box.pack(fill=tk.X, pady=(4, 0))
+        if prefix:
+            tk.Label(box, text=prefix, bg=COLORS["input"], fg=COLORS["muted"], font=sans(10)).pack(side=tk.LEFT, padx=(8, 0))
         entry = tk.Entry(
-            wrapper,
+            box,
             textvariable=variable,
             width=width,
             bg=COLORS["input"],
-            fg=COLORS["strong"],
-            insertbackground=COLORS["strong"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["primary"],
             selectbackground=COLORS["primary"],
-            selectforeground="#ffffff",
+            selectforeground=COLORS["button_text"],
             relief=tk.FLAT,
             bd=0,
-            highlightthickness=1,
-            highlightbackground=COLORS["line"],
-            highlightcolor=COLORS["primary"],
-            font=mono(10),
+            highlightthickness=0,
+            font=sans(10),
         )
-        entry.pack(fill=tk.X, pady=(4, 0), ipady=6, ipadx=8)
+        entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6, padx=8)
+        entry.bind("<FocusIn>", lambda e: box.configure(highlightbackground=COLORS["primary"]), add="+")
+        entry.bind("<FocusOut>", lambda e: box.configure(highlightbackground=COLORS["line_high"]), add="+")
         entry.bind("<Return>", lambda event: self.save_from_keyboard())
+        if hint:
+            self.add_placeholder(entry, variable, hint)
         return entry
 
     def create_category_input(self, parent):
         wrapper = tk.Frame(parent, bg=COLORS["card"])
-        wrapper.pack(fill=tk.X, pady=(12, 0))
+        wrapper.pack(fill=tk.X, pady=(10, 0))
 
-        tk.Label(wrapper, text="CATEGORY", bg=COLORS["card"], fg=COLORS["muted"], font=mono(8)).pack(anchor=tk.W)
+        self.caps(wrapper, "Category", color=COLORS["dim"]).pack(anchor=tk.W)
         combo = ttk.Combobox(
             wrapper,
             textvariable=self.category_var,
             values=CATEGORIES,
             state="normal",
             width=28,
-            font=mono(10),
+            font=sans(10),
         )
-        combo.pack(fill=tk.X, pady=(4, 0), ipady=1)
+        combo.pack(fill=tk.X, pady=(4, 0))
         self.category_entry = combo
         combo.bind("<Return>", lambda event: self.save_from_keyboard())
-
-    def build_footer(self, parent):
-        footer = tk.Frame(parent, bg=COLORS["page"])
-        footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
-        tk.Frame(footer, bg=COLORS["line"], height=1).pack(fill=tk.X, pady=(0, 8))
-        tk.Label(footer, text="PRODUCT INVENTORY SYSTEM // IM102", bg=COLORS["page"], fg=COLORS["faint"], font=mono(7)).pack(side=tk.LEFT)
-        tk.Label(
-            footer,
-            text="ENTER SAVE  ·  ESC CLEAR  ·  DEL DELETE  ·  CTRL+F SEARCH  ·  CTRL+L THEME",
-            bg=COLORS["page"],
-            fg=COLORS["faint"],
-            font=mono(7),
-        ).pack(side=tk.RIGHT)
 
     def bind_shortcuts(self):
         self.root.bind("<Escape>", lambda event: self.clear_fields())
@@ -571,10 +688,11 @@ class InventoryApp:
     # ---------------------------------------------------------------- feedback
 
     def show_toast(self, message, kind="success"):
-        accent = {"success": COLORS["green"], "info": COLORS["primary"], "error": COLORS["red"]}[kind]
+        accent = {"success": COLORS["primary"], "info": COLORS["secondary"], "error": COLORS["red"]}[kind]
         icon = {"success": "✓", "info": "ℹ", "error": "⚠"}[kind]
-        self.toast.configure(text=f"{icon}  {message.upper()}", fg=accent, highlightthickness=1, highlightbackground=accent)
-        self.toast.place(relx=1.0, rely=1.0, x=-22, y=-34, anchor=tk.SE)
+        self.toast_stripe.configure(bg=accent)
+        self.toast_label.configure(text=f"{icon}  {message}", fg=accent)
+        self.toast.place(relx=1.0, x=-20, y=66, anchor=tk.NE)
         self.toast.lift()
 
         if self.toast_job:
@@ -598,7 +716,7 @@ class InventoryApp:
         self.log_box.configure(state=tk.DISABLED)
 
     def show_error(self, message, widget=None):
-        self.error_var.set(f"⚠  {message.upper()}")
+        self.error_var.set(f"⚠  {message}")
         if widget is not None:
             widget.focus_set()
 
@@ -606,15 +724,17 @@ class InventoryApp:
         self.update_button.set_enabled(editing)
         self.delete_button.set_enabled(editing)
         if editing:
-            self.form_subtitle.configure(text=f"EDITING P{self.selected_product_id:03d}. CHANGE DETAILS, THEN UPDATE")
-            self.mode_badge.configure(text="EDITING", bg=COLORS["amber_soft"], fg=COLORS["amber"], highlightbackground=COLORS["amber"])
+            self.form_title.configure(text="Edit Product")
+            self.form_subtitle.configure(text=f"Change the details of P{self.selected_product_id:03d}, then click Update.")
+            self.mode_badge.configure(text="Editing", bg=COLORS["amber_soft"], fg=COLORS["amber"])
         else:
-            self.form_subtitle.configure(text="ADD A NEW PRODUCT OR SELECT A TABLE ROW")
-            self.mode_badge.configure(text="READY", bg=COLORS["primary_soft"], fg=COLORS["primary"], highlightbackground=COLORS["primary_line"])
+            self.form_title.configure(text="Add a Product")
+            self.form_subtitle.configure(text="Type the details, or click a row to edit.")
+            self.mode_badge.configure(text="New", bg=COLORS["primary_soft"], fg=COLORS["primary"])
         self.update_inspector()
 
     def update_inspector(self):
-        if not hasattr(self, "stock_meter"):
+        if not hasattr(self, "stock_meter") or not self.stock_meter.winfo_exists():
             return
 
         product = self.find_product(self.selected_product_id)
@@ -623,36 +743,38 @@ class InventoryApp:
         width = max(meter.winfo_width(), 100)
 
         if product is None:
-            self.inspect_pill.configure(text="IDLE // READY", fg=COLORS["faint"])
-            self.ins_name.configure(text="SELECT ANY ITEM FROM THE TABLE")
-            self.ins_id.configure(text="ID: --")
-            self.ins_price.configure(text="--")
-            self.ins_details.configure(text="CATEGORY: --\nQUANTITY: --     TOTAL VALUE: --")
-            meter.create_line(0, 11, width, 11, fill=COLORS["line_high"], dash=(2, 3))
+            self.inspect_pill.configure(text="No product selected", fg=COLORS["faint"], bg=COLORS["card"])
+            self.ins_name.configure(text="Click a product in the table")
+            self.ins_id.configure(text="Its details and stock level will show here.")
+            for label in self.ins_tiles.values():
+                label.configure(text="--", fg=COLORS["faint"])
+            meter.create_rectangle(0, 4, width, 9, outline="", fill=COLORS["card_high"])
             return
 
         quantity = product["quantity"]
         if quantity == 0:
-            status, color = "OUT OF STOCK", COLORS["red"]
+            status, key = "Out of stock", "red"
         elif quantity < database.LOW_STOCK_THRESHOLD:
-            status, color = "LOW STOCK", COLORS["amber"]
+            status, key = "Low stock", "amber"
         else:
-            status, color = "IN STOCK", COLORS["green"]
+            status, key = "In stock", "green"
+        color = COLORS[key]
 
-        self.inspect_pill.configure(text=f"● {status}", fg=color)
-        self.ins_name.configure(text=product["product_name"].upper()[:30])
-        self.ins_id.configure(text=f"ID: P{product['product_id']:03d}")
-        self.ins_price.configure(text=peso(product["unit_price"]))
-        self.ins_details.configure(
-            text=f"CATEGORY: {product['category'].upper()}\nQUANTITY: {quantity:,} PCS     TOTAL VALUE: {peso(product['total'])}"
-        )
+        self.inspect_pill.configure(text=status, fg=color, bg=COLORS[f"{key}_soft"])
+        name = product["product_name"]
+        self.ins_name.configure(text=name if len(name) <= 34 else name[:33] + "…")
+        self.ins_id.configure(text=f"P{product['product_id']:03d}  ·  {product['category']}")
+        self.ins_tiles["Stock"].configure(text=f"{quantity:,} pcs", fg=color)
+        self.ins_tiles["Unit Price"].configure(text=peso(product["unit_price"]), fg=COLORS["text"])
+        self.ins_tiles["Total Value"].configure(text=peso(product["total"]), fg=COLORS["text"])
+        self.ins_tiles["Status"].configure(text=status, fg=color)
 
-        # Stock meter: the bar is this product's stock compared with the biggest stock in the list.
+        # Stock meter: this product's stock compared with the biggest stock in the list.
         biggest = max(max(p["quantity"] for p in self.products), database.LOW_STOCK_THRESHOLD * 2)
-        meter.create_rectangle(0, 6, width, 16, outline=COLORS["line"], fill=COLORS["card"])
-        meter.create_rectangle(0, 6, max(int(width * quantity / biggest), 2), 16, outline="", fill=color)
+        meter.create_rectangle(0, 4, width, 9, outline="", fill=COLORS["card_high"])
+        meter.create_rectangle(0, 4, max(int(width * quantity / biggest), 3), 9, outline="", fill=color)
         threshold_x = int(width * database.LOW_STOCK_THRESHOLD / biggest)
-        meter.create_line(threshold_x, 2, threshold_x, 20, fill=COLORS["red"], dash=(2, 2))
+        meter.create_line(threshold_x, 0, threshold_x, 13, fill=COLORS["red"], dash=(2, 2))
 
     def start_new_product(self):
         self.clear_fields()
@@ -673,6 +795,9 @@ class InventoryApp:
         if self.placeholder_trace:
             self.search_var.trace_remove("write", self.placeholder_trace)
             self.placeholder_trace = None
+        for variable, trace in self.form_traces:
+            variable.trace_remove("write", trace)
+        self.form_traces = []
         viewer_was_open = self.viewer_is_open()
         for widget in self.root.winfo_children():
             widget.destroy()
@@ -717,8 +842,16 @@ class InventoryApp:
             self.show_error("Please enter a product name.", self.name_entry)
             return None
 
+        if len(product_name) > MAX_NAME_LENGTH:
+            self.show_error(f"Product name must be {MAX_NAME_LENGTH} characters or less.", self.name_entry)
+            return None
+
         if not category:
             self.show_error("Please enter a category.", self.category_entry)
+            return None
+
+        if len(category) > MAX_CATEGORY_LENGTH:
+            self.show_error(f"Category must be {MAX_CATEGORY_LENGTH} characters or less.", self.category_entry)
             return None
 
         quantity = parse_quantity(quantity_text)
@@ -730,9 +863,17 @@ class InventoryApp:
             self.show_error("Quantity cannot be negative.", self.quantity_entry)
             return None
 
+        if quantity > database.MAX_QUANTITY:
+            self.show_error(f"Quantity cannot be more than {database.MAX_QUANTITY:,} pcs.", self.quantity_entry)
+            return None
+
         unit_price = parse_price(price_text)
         if unit_price is None or unit_price < 0:
             self.show_error("Please enter a valid price, like 25 or 8.50.", self.price_entry)
+            return None
+
+        if unit_price > database.MAX_PRICE:
+            self.show_error(f"Price cannot be more than {peso(database.MAX_PRICE)}.", self.price_entry)
             return None
 
         return product_name, category, quantity, unit_price
@@ -753,6 +894,12 @@ class InventoryApp:
         except sqlite3.DatabaseError:
             self.log("ERROR", "Unable to save changes.")
             messagebox.showerror("Save Problem", "Unable to save changes. Please try again.")
+            return
+
+        if result == "too_much":
+            self.show_error(
+                f"Adding {values[2]:,} pcs would put this product over {database.MAX_QUANTITY:,} pcs.", self.quantity_entry
+            )
             return
 
         self.refresh_data()
@@ -889,17 +1036,31 @@ class InventoryApp:
 
         totals = database.get_dashboard_totals()
         self.total_value_var.set(peso(totals["total_value"]))
-        self.total_products_var.set(f"{totals['total_products']:,} PRODUCTS")
-        self.total_units_var.set(f"({totals['total_stock_units']:,} UNITS)")
-        self.count_badge.configure(text=f"{totals['total_products']:02d}")
+        self.total_products_var.set(f"{totals['total_products']:,}")
+        self.total_units_var.set(f"{totals['total_stock_units']:,} units")
 
         low = [p for p in self.products if p["quantity"] < database.LOW_STOCK_THRESHOLD]
-        self.low_stock_var.set(f"{len(low)} ALERT" + ("" if len(low) == 1 else "S"))
-        if low:
-            names = ", ".join(f"P{p['product_id']:03d} {p['product_name'].upper()}" for p in low[:3])
-            self.low_stock_detail_var.set(names + (" ..." if len(low) > 3 else ""))
-        else:
-            self.low_stock_detail_var.set("ALL STOCK LEVELS OK")
+        out = [p for p in low if p["quantity"] == 0]
+        self.low_stock_var.set(f"{len(low)}")
+        self.low_stock_detail_var.set(short_list(low) if low else "All stock levels are OK")
+        self.out_stock_var.set(f"{len(out)}")
+        self.out_stock_detail_var.set(short_list(out) if out else "Nothing is out of stock")
+        self.out_stock_unit_var.set("need restock" if out else "")
+
+        count = len(self.products)
+        in_stock = count - len(low)
+        self.health_ratio = in_stock / count if count else 0.0
+        self.health_var.set(f"{self.health_ratio:.0%}")
+        self.draw_health()
+        self.sidebar_records_var.set(f"{count} record{'s' if count != 1 else ''}")
+        self.footer_var.set(
+            f"Records: {count:,}   ·   Units in stock: {totals['total_stock_units']:,}   ·   Session started {self.started_at}"
+        )
+        try:
+            size = database.DB_PATH.stat().st_size
+        except OSError:
+            size = 0
+        self.db_size_var.set(f"{size / 1024:,.1f} KB")
         self.update_inspector()
         if self.viewer_is_open():
             self.viewer.load_records()
@@ -933,11 +1094,11 @@ class InventoryApp:
             quantity = product["quantity"]
 
             if quantity == 0:
-                status, status_tag = "✕ OUT", "out"
+                status, status_tag = "Out of stock", "out"
             elif quantity < database.LOW_STOCK_THRESHOLD:
-                status, status_tag = "▲ LOW STOCK", "low"
+                status, status_tag = "Low stock", "low"
             else:
-                status, status_tag = "● OK", None
+                status, status_tag = "In stock", None
 
             tags = ["even" if index % 2 == 0 else "odd"]
             if status_tag:
@@ -949,9 +1110,9 @@ class InventoryApp:
                 iid=str(product_id),
                 values=(
                     f"P{product_id:03d}",
-                    product["product_name"].upper(),
-                    product["category"].upper(),
-                    f"{quantity:,} PCS",
+                    product["product_name"],
+                    product["category"],
+                    f"{quantity:,} pcs",
                     status,
                     peso(product["unit_price"]),
                     peso(product["total"]),
@@ -963,15 +1124,18 @@ class InventoryApp:
             self.tree.selection_set(str(self.selected_product_id))
 
         self.update_sort_arrows()
-        self.row_count_var.set(f"SHOWING {len(products)} OF {len(self.products)} PRODUCTS")
+        self.row_count_var.set(f"{len(products)} of {len(self.products)} shown")
+        self.index_var.set(
+            f"Sorted by {TABLE_COLUMNS_BY_KEY.get(self.sort_key, 'ID')} ({'high to low' if self.sort_reverse else 'low to high'})"
+        )
 
         if products:
             self.empty_label.place_forget()
         else:
             if self.products:
-                self.empty_label.configure(text="[NO PRODUCTS MATCH YOUR SEARCH OR FILTER]")
+                self.empty_label.configure(text="No products match your search or filter.\nTry another word or click All.")
             else:
-                self.empty_label.configure(text="[NO PRODUCTS YET]\nADD YOUR FIRST PRODUCT USING THE CONTROL PANEL")
+                self.empty_label.configure(text="No products yet.\nAdd your first product using the form on the right.")
             self.empty_label.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
 

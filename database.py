@@ -4,6 +4,8 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).with_name("inventory.db")
 LOW_STOCK_THRESHOLD = 10
+MAX_QUANTITY = 1_000_000  # biggest stock allowed for one product
+MAX_PRICE = 1_000_000  # biggest unit price allowed (PHP)
 
 
 def get_connection():
@@ -34,7 +36,7 @@ def add_product(product_name, category, quantity, unit_price):
     with get_connection() as connection:
         existing_product = connection.execute(
             """
-            SELECT product_id
+            SELECT product_id, quantity
             FROM products
             WHERE product_name = ? COLLATE NOCASE
               AND category = ? COLLATE NOCASE
@@ -46,6 +48,8 @@ def add_product(product_name, category, quantity, unit_price):
         ).fetchone()
 
         if existing_product:
+            if existing_product["quantity"] + quantity > MAX_QUANTITY:
+                return "too_much"
             connection.execute(
                 """
                 UPDATE products

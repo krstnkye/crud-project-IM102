@@ -4,12 +4,13 @@ This is a simple IM102 project made with Python, Tkinter, and SQLite.
 
 The app helps you keep a list of products. You can add a product, see the saved products, change product details, and delete products you no longer need.
 
-The top part of the app shows:
+The five summary cards at the top of the app show:
 
-- Total Products
-- Total Stock
-- Low Stock
-- Total Value
+- Total Inventory Value (quantity × unit price of all products)
+- Registered Products, with the total number of units
+- Low Stock Alerts (products with less than 10 pieces)
+- Out of Stock (products with 0 pieces)
+- SQLite Database (the size of `inventory.db`)
 
 ## What You Need
 
@@ -25,6 +26,7 @@ crud-project-IM102/
 |-- database.py
 |-- database_viewer.py
 |-- theme.py
+|-- test_database.py
 |-- inventory.db (created automatically after the app starts)
 |-- README.md
 |-- .gitignore
@@ -64,7 +66,8 @@ py main.py
 | Delete | Removes the selected product after asking first. |
 | Clear Fields | Empties the form so you can type again. |
 | New Product | Clears the form and puts the cursor in Product Name. |
-| DB Records | Opens a window that shows the raw rows inside `inventory.db`. It updates by itself after every change. |
+| Database Records | Opens a window that shows the raw rows inside `inventory.db`, the database details, and quick queries. It updates by itself after every change. |
+| Export CSV | In the Database Records window, saves the rows shown to a CSV file you can open in Excel. |
 | Light Mode / Dark Mode | Switches the app between the dark and light theme. |
 
 Update and Delete only turn on after you click a product in the list.
@@ -76,7 +79,8 @@ Update and Delete only turn on after you click a product in the list.
 - **Search:** type in the search box to filter products by ID, name, or category.
 - **Sorting:** click a column heading to sort. Click it again to reverse the order.
 - **Stock status:** products with less than 10 pieces are shown in amber, and products with 0 pieces in red.
-- **Product inspector:** shows the selected product's details and a stock bar compared with the low stock line.
+- **Product details:** shows the selected product's stock, price, total value, status, and a stock bar compared with the low stock line.
+- **Fonts:** the app uses Segoe UI, the normal Windows font. On Mac or Linux it uses a similar font that is already installed.
 - **Activity log:** lists what you added, updated, or deleted while the app is open.
 - **Keyboard shortcuts:** `Enter` saves the form, `Esc` clears it, `Delete` removes the selected product (click the table first), `Ctrl+F` jumps to the search box, and `Ctrl+L` switches the theme.
 
@@ -97,7 +101,7 @@ If you add a product with the same name, category, and price as one that is alre
 
 ## Messages
 
-The app shows a small notice in the bottom-right corner when:
+The app shows a small notice at the top of the window when:
 
 - A product is saved
 - A product is changed
@@ -106,14 +110,26 @@ The app shows a small notice in the bottom-right corner when:
 A red message appears inside the form when:
 
 - A required field is empty
-- Quantity is not a whole number, or is negative
-- Price is not a normal number with up to 2 decimals (like 25 or 8.50), or is negative
+- Product Name is longer than 60 characters, or Category is longer than 30 characters
+- Quantity is not a whole number, is negative, or is more than 1,000,000 pieces
+- Price is not a normal number with up to 2 decimals (like 25 or 8.50), is negative, or is more than PHP 1,000,000.00
+- Adding to a saved product would put its stock over 1,000,000 pieces
 - An update would make the same product (same name, category, and price) as another one
 - No product is selected before updating or deleting
 
 Deleting a product still asks for confirmation in a pop-up first.
 
-## Suggested Testing
+## Automatic Tests
+
+`test_database.py` checks adding, adding to an existing product, updating, deleting, the totals, and the input checks. It uses a temporary database, so your saved products are not touched. Run it from the project folder:
+
+```bash
+python -m unittest test_database.py
+```
+
+It should end with `OK`.
+
+## Suggested Manual Testing
 
 1. Add a product.
 2. Check if it appears in the product list.
