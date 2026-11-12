@@ -200,7 +200,7 @@ class DatabaseViewer:
     # ------------------------------------------------------------------ data
 
     def column_types(self):
-        with sqlite3.connect(DB_PATH) as connection:
+        with database.database_connection() as connection:
             info = connection.execute("PRAGMA table_info(products)").fetchall()
         return {name: f"{kind} PK" if primary_key else kind for _, name, kind, _, _, primary_key in info}
 
@@ -211,7 +211,7 @@ class DatabaseViewer:
     def load_records(self):
         sql, parameters = QUERIES[self.query_name]
         started = time.perf_counter()
-        with sqlite3.connect(DB_PATH) as connection:
+        with database.database_connection() as connection:
             self.records = connection.execute(sql, parameters).fetchall()
             total_rows = connection.execute("SELECT COUNT(*), COALESCE(SUM(quantity), 0) FROM products").fetchone()
             journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]

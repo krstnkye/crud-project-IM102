@@ -7,11 +7,14 @@ Run them from the project folder with:
 The tests use a temporary database file, so your real inventory.db is not touched.
 """
 
+import gc
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 
 import database
+import database_viewer
 from main import parse_price, parse_quantity
 
 
@@ -19,12 +22,26 @@ class DatabaseTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.real_path = database.DB_PATH
+        self.real_viewer_path = database_viewer.DB_PATH
         database.DB_PATH = Path(self.folder.name) / "test_inventory.db"
+        database_viewer.DB_PATH = database.DB_PATH
         database.initialize_database()
 
     def tearDown(self):
         database.DB_PATH = self.real_path
+        database_viewer.DB_PATH = self.real_viewer_path
         self.folder.cleanup()
+
+    def test_database_viewer_closes_its_connection(self):
+        viewer = database_viewer.DatabaseViewer.__new__(database_viewer.DatabaseViewer)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ResourceWarning)
+            viewer.column_types()
+            gc.collect()
+
+        resource_warnings = [warning for warning in caught if warning.category is ResourceWarning]
+        self.assertEqual(resource_warnings, [])
 
     def test_add_product(self):
         self.assertEqual(database.add_product("Ballpen (Black)", "School Supplies", 120, 8.5), "created")

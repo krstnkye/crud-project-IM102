@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -14,8 +15,19 @@ def get_connection():
     return connection
 
 
+@contextmanager
+def database_connection():
+    """Provide a transaction and always release the SQLite file handle."""
+    connection = get_connection()
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
+
+
 def initialize_database():
-    with get_connection() as connection:
+    with database_connection() as connection:
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS products (
@@ -33,7 +45,7 @@ def add_product(product_name, category, quantity, unit_price):
     product_name = product_name.strip()
     category = category.strip()
 
-    with get_connection() as connection:
+    with database_connection() as connection:
         existing_product = connection.execute(
             """
             SELECT product_id, quantity
@@ -71,7 +83,7 @@ def add_product(product_name, category, quantity, unit_price):
 
 
 def get_products():
-    with get_connection() as connection:
+    with database_connection() as connection:
         return connection.execute(
             """
             SELECT product_id, product_name, category, quantity, unit_price
@@ -85,7 +97,7 @@ def update_product(product_id, product_name, category, quantity, unit_price):
     product_name = product_name.strip()
     category = category.strip()
 
-    with get_connection() as connection:
+    with database_connection() as connection:
         duplicate = connection.execute(
             """
             SELECT product_id
@@ -113,7 +125,7 @@ def update_product(product_id, product_name, category, quantity, unit_price):
 
 
 def delete_product(product_id):
-    with get_connection() as connection:
+    with database_connection() as connection:
         connection.execute(
             "DELETE FROM products WHERE product_id = ?",
             (product_id,),
@@ -121,7 +133,7 @@ def delete_product(product_id):
 
 
 def get_dashboard_totals():
-    with get_connection() as connection:
+    with database_connection() as connection:
         row = connection.execute(
             """
             SELECT
