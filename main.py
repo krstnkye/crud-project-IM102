@@ -28,8 +28,10 @@ TABLE_COLUMNS_BY_KEY = {sort_key: heading for heading, width, anchor, sort_key i
 LOG_COLORS = {"BOOT": "primary", "ADD": "green", "RESTOCK": "green", "UPDATE": "primary", "DELETE": "red", "ALERT": "amber", "ERROR": "red", "THEME": "muted"}
 
 
-QUANTITY_PATTERN = re.compile(r"-?\d+")
-PRICE_PATTERN = re.compile(r"-?(\d+(\.\d{1,2})?|\.\d{1,2})")
+QUANTITY_PATTERN = re.compile(r"-?\d+", re.ASCII)
+PRICE_PATTERN = re.compile(r"-?(\d+(\.\d{1,2})?|\.\d{1,2})", re.ASCII)
+MAX_NAME_LENGTH = 60
+MAX_CATEGORY_LENGTH = 30
 
 
 def parse_quantity(text):
@@ -840,8 +842,16 @@ class InventoryApp:
             self.show_error("Please enter a product name.", self.name_entry)
             return None
 
+        if len(product_name) > MAX_NAME_LENGTH:
+            self.show_error(f"Product name must be {MAX_NAME_LENGTH} characters or less.", self.name_entry)
+            return None
+
         if not category:
             self.show_error("Please enter a category.", self.category_entry)
+            return None
+
+        if len(category) > MAX_CATEGORY_LENGTH:
+            self.show_error(f"Category must be {MAX_CATEGORY_LENGTH} characters or less.", self.category_entry)
             return None
 
         quantity = parse_quantity(quantity_text)
@@ -853,9 +863,17 @@ class InventoryApp:
             self.show_error("Quantity cannot be negative.", self.quantity_entry)
             return None
 
+        if quantity > database.MAX_QUANTITY:
+            self.show_error(f"Quantity cannot be more than {database.MAX_QUANTITY:,} pcs.", self.quantity_entry)
+            return None
+
         unit_price = parse_price(price_text)
         if unit_price is None or unit_price < 0:
             self.show_error("Please enter a valid price, like 25 or 8.50.", self.price_entry)
+            return None
+
+        if unit_price > database.MAX_PRICE:
+            self.show_error(f"Price cannot be more than {peso(database.MAX_PRICE)}.", self.price_entry)
             return None
 
         return product_name, category, quantity, unit_price
@@ -876,6 +894,12 @@ class InventoryApp:
         except sqlite3.DatabaseError:
             self.log("ERROR", "Unable to save changes.")
             messagebox.showerror("Save Problem", "Unable to save changes. Please try again.")
+            return
+
+        if result == "too_much":
+            self.show_error(
+                f"Adding {values[2]:,} pcs would put this product over {database.MAX_QUANTITY:,} pcs.", self.quantity_entry
+            )
             return
 
         self.refresh_data()
