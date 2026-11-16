@@ -31,7 +31,7 @@ TABLE_COLUMNS = {
 TABLE_COLUMNS_BY_KEY = {sort_key: heading for heading, width, anchor, sort_key in TABLE_COLUMNS.values() if sort_key != "quantity" or heading == "Stock"}
 
 LOG_COLORS = {
-    "BOOT": "primary", "ADD": "green", "RESTOCK": "green", "UPDATE": "primary", "DELETE": "red", "ALERT": "amber",
+    "START": "primary", "ADD": "green", "RESTOCK": "green", "UPDATE": "primary", "DELETE": "red", "ALERT": "amber",
     "ERROR": "red", "THEME": "muted", "SIGN IN": "secondary", "SIGN UP": "secondary", "SIGN OUT": "muted",
     "PROFILE": "amber", "PASSWORD": "amber", "ROLE": "amber", "ACCOUNT": "amber",
 }
@@ -137,7 +137,7 @@ class InventoryApp:
         self.unit_price_var.trace_add("write", self.update_item_total)
         self.search_var.trace_add("write", lambda *args: self.render_table())
 
-        self.log("BOOT", f"Welcome, {user.full_name}. {len(self.products)} product(s) loaded from inventory.db.")
+        self.log("START", f"Welcome, {user.full_name}. {len(self.products)} product(s) loaded from inventory.db.")
         low = [p for p in self.products if p["quantity"] < database.LOW_STOCK_THRESHOLD]
         if low:
             self.log("ALERT", f"{len(low)} product(s) below {database.LOW_STOCK_THRESHOLD} pieces. Restock suggested.")
@@ -250,11 +250,11 @@ class InventoryApp:
         box.pack(fill=tk.X, pady=(10, 0))
         row = tk.Frame(box, bg=COLORS["card"])
         row.pack(fill=tk.X)
-        self.caps(row, "SQLite engine").pack(side=tk.LEFT)
+        self.caps(row, "Database").pack(side=tk.LEFT)
         tk.Label(row, text=f"v{sqlite3.sqlite_version}", bg=COLORS["card"], fg=COLORS["primary_hover"], font=sans(8, "bold")).pack(side=tk.RIGHT)
         row = tk.Frame(box, bg=COLORS["card"])
         row.pack(fill=tk.X, pady=(6, 0))
-        tk.Label(row, text="Stock health", bg=COLORS["card"], fg=COLORS["dim"], font=sans(8)).pack(side=tk.LEFT)
+        tk.Label(row, text="Products in stock", bg=COLORS["card"], fg=COLORS["dim"], font=sans(8)).pack(side=tk.LEFT)
         tk.Label(row, textvariable=self.health_var, bg=COLORS["card"], fg=COLORS["text"], font=sans(8, "bold")).pack(side=tk.RIGHT)
         self.health_bar = tk.Canvas(box, height=4, bg=COLORS["card_top"], highlightthickness=0)
         self.health_bar.pack(fill=tk.X, pady=(5, 0))
@@ -429,10 +429,10 @@ class InventoryApp:
 
         cards = [
             ("Total Inventory Value", "₱", "secondary", self.total_value_var, None, "Quantity × unit price, all products", "muted"),
-            ("Registered Products", "▦", "primary", self.total_products_var, self.total_units_var, "● Saved in inventory.db", "primary"),
-            ("Low Stock Alerts", "▲", "amber", self.low_stock_var, self.low_stock_unit_var, self.low_stock_detail_var, "amber"),
+            ("Total Products", "▦", "primary", self.total_products_var, self.total_units_var, "● Saved in inventory.db", "primary"),
+            ("Low Stock", "▲", "amber", self.low_stock_var, self.low_stock_unit_var, self.low_stock_detail_var, "amber"),
             ("Out of Stock", "⊘", "red", self.out_stock_var, self.out_stock_unit_var, self.out_stock_detail_var, "red"),
-            ("SQLite Database", "⛁", "primary", self.db_size_var, None, f"3 tables · SQLite v{sqlite3.sqlite_version}", "muted"),
+            ("Database File", "⛁", "primary", self.db_size_var, None, f"3 tables · SQLite v{sqlite3.sqlite_version}", "muted"),
         ]
 
         for index, (label, icon, color, value, extra, note, note_color) in enumerate(cards):
@@ -682,8 +682,8 @@ class InventoryApp:
         total_box.pack(fill=tk.X, pady=(12, 0))
         labels = tk.Frame(total_box, bg=COLORS["card_high"])
         labels.pack(side=tk.LEFT)
-        self.caps(labels, "Item Total", bg=COLORS["card_high"]).pack(anchor=tk.W)
-        tk.Label(labels, text="Qty × Unit Price", bg=COLORS["card_high"], fg=COLORS["dim"], font=sans(8)).pack(anchor=tk.W)
+        self.caps(labels, "Total Amount", bg=COLORS["card_high"]).pack(anchor=tk.W)
+        tk.Label(labels, text="Quantity × Unit Price", bg=COLORS["card_high"], fg=COLORS["dim"], font=sans(8)).pack(anchor=tk.W)
         tk.Label(total_box, textvariable=self.item_total_var, bg=COLORS["card_high"], fg=COLORS["secondary"], font=sans(16, "bold")).pack(side=tk.RIGHT)
 
         self.error_label = tk.Label(
@@ -1184,7 +1184,7 @@ class InventoryApp:
         self.draw_health()
         self.sidebar_records_var.set(f"{count} record{'s' if count != 1 else ''}")
         self.footer_var.set(
-            f"Records: {count:,}   ·   Units in stock: {totals['total_stock_units']:,}   ·   Session started {self.started_at}"
+            f"Records: {count:,}   ·   Units in stock: {totals['total_stock_units']:,}   ·   Signed in at {self.started_at}"
         )
         try:
             size = database.DB_PATH.stat().st_size

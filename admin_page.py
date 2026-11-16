@@ -21,30 +21,30 @@ class AdminPage:
 
     def build(self):
         stat_tiles(self.frame, (
-            ("members", "Team Members", "strong"),
-            ("active", "Active Accounts", "green"),
-            ("today", "Product Changes Today", "primary"),
-            ("week", "Product Changes, Last 7 Days", "secondary"),
+            ("members", "Total Users", "strong"),
+            ("active", "Active Users", "green"),
+            ("today", "Changes Today", "primary"),
+            ("week", "Changes in the Last 7 Days", "secondary"),
         ), self.stat_vars)
         tk.Label(self.frame, textvariable=self.members_note, bg=COLORS["page"], fg=COLORS["muted"], font=sans(8)).pack(anchor=tk.W, pady=(4, 0))
 
-        # Team list with an Open Profile button.
+        # User list with a View Profile button.
         outer, card = panel(self.frame, padx=0, pady=0)
         outer.pack(fill=tk.X, pady=(8, 0))
-        top = card_header(card, "Team", None)
+        top = card_header(card, "Users", None)
         FlatButton(
-            top, "Open Profile", self.open_selected, COLORS["button"], COLORS["button_text"], COLORS["primary_hover"],
+            top, "View Profile", self.open_selected, COLORS["button"], COLORS["button_text"], COLORS["primary_hover"],
             font_size=8, pady=4, border=COLORS["button"],
         ).pack(side=tk.RIGHT)
-        caps(top, "Double-click a person to open their profile and manage the account", weight="normal").pack(side=tk.RIGHT, padx=(0, 12))
+        caps(top, "Double-click a user to view their profile", weight="normal").pack(side=tk.RIGHT, padx=(0, 12))
         self.team = table(card, (
             ("user", "User", 130, tk.W),
             ("name", "Full Name", 170, tk.W),
             ("role", "Role", 80, tk.W),
             ("status", "Status", 90, tk.W),
-            ("changes", "Product Changes", 120, tk.E),
-            ("last_change", "Last Change", 150, tk.W),
-            ("last_login", "Last Sign-in", 150, tk.W),
+            ("changes", "Changes", 120, tk.E),
+            ("last_change", "Last Update", 150, tk.W),
+            ("last_login", "Last Sign In", 150, tk.W),
         ), height=4)
         self.team.bind("<Double-1>", lambda event: self.open_selected())
         self.team.bind("<Return>", lambda event: self.open_selected())
@@ -54,14 +54,14 @@ class AdminPage:
         outer.pack(fill=tk.BOTH, expand=True, pady=(14, 0))
         top = card_header(card, "All Activity")
         self.filter_buttons = {}
-        for only, text in ((False, "Everything"), (True, "Product changes only")):
+        for only, text in ((False, "All"), (True, "Products Only")):
             button = FlatButton(
                 top, text, lambda value=only: self.set_filter(value), COLORS["card_high"], COLORS["dim"], COLORS["card_top"],
                 font_size=8, padx=9, pady=3, border=COLORS["line"], hover_fg=COLORS["strong"], weight="normal",
             )
             button.pack(side=tk.LEFT, padx=(10, 0))
             self.filter_buttons[only] = button
-        caps(top, "Who did what, newest first", weight="normal").pack(side=tk.RIGHT)
+        caps(top, "Newest first", weight="normal").pack(side=tk.RIGHT)
         self.activity = table(card, (
             ("time", "When", 165, tk.W),
             ("user", "User", 120, tk.W),
@@ -97,7 +97,7 @@ class AdminPage:
         self.stat_vars["week"].set(f"{changes_week:,}")
         self.members_note.set(
             f"{admins} admin{'s' if admins != 1 else ''} and {len(team) - admins} staff"
-            f"  ·  {len(team) - active} account{'s' if len(team) - active != 1 else ''} turned off"
+            f"  ·  {len(team) - active} inactive"
         )
 
         self.team.delete(*self.team.get_children())
@@ -114,9 +114,9 @@ class AdminPage:
                     f"@{member['username']}" + ("  (you)" if is_me else ""),
                     member["full_name"],
                     "Admin" if member["role"] == "admin" else "Staff",
-                    "Active" if member["is_active"] else "Turned off",
+                    "Active" if member["is_active"] else "Inactive",
                     f"{member['changes']:,}",
-                    short_time(member["last_change"], "None yet"),
+                    short_time(member["last_change"], "None"),
                     short_time(member["last_login"]),
                 ),
                 tags=tuple(tags),

@@ -228,7 +228,7 @@ def get_user_stats(user_id):
 
 
 def get_team_summary():
-    """Every user with their number of product changes and last sign-in, for the Team list."""
+    """Every user with their number of product changes and last sign-in, for the user list."""
     with database_connection() as connection:
         return connection.execute(
             f"""

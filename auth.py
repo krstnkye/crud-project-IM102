@@ -121,7 +121,7 @@ def sign_in(username, password):
 
     _failed_attempts.pop(key, None)
     if not row["is_active"]:
-        raise ValidationError("This account is turned off. Please ask an admin to turn it back on.", "username")
+        raise ValidationError("This account is inactive. Please ask an admin to activate it.", "username")
 
     # Upgrade old hashes to the current number of iterations.
     if row["password_hash"].split("$")[1] != str(ITERATIONS):
@@ -194,15 +194,15 @@ def admin_set_role(admin, user_id, role):
 
 
 def admin_set_active(admin, user_id, active):
-    """Turn an account on or off. Admins cannot turn off their own account."""
+    """Activate or deactivate an account. Admins cannot deactivate their own account."""
     _require_admin(admin)
     row = _target(user_id)
     if not active and user_id == admin.user_id:
-        raise ValidationError("You cannot turn off your own account.")
+        raise ValidationError("You cannot deactivate your own account.")
     if not active and row["role"] == "admin" and database.count_active_admins() <= 1:
         raise ValidationError("There must always be at least one active admin.")
     database.set_active(user_id, active)
-    database.add_activity(admin.user_id, "ACCOUNT", f"Turned {'on' if active else 'off'} the account of @{row['username']}.")
+    database.add_activity(admin.user_id, "ACCOUNT", f"{'Activated' if active else 'Deactivated'} the account of @{row['username']}.")
 
 
 def admin_reset_password(admin, user_id):

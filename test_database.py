@@ -258,12 +258,12 @@ class AuthTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             auth.admin_set_role(admin, admin.user_id, "staff")  # the last admin must stay
         with self.assertRaises(ValidationError):
-            auth.admin_set_active(admin, admin.user_id, False)  # cannot turn off yourself
+            auth.admin_set_active(admin, admin.user_id, False)  # cannot deactivate yourself
 
         auth.admin_set_active(admin, staff.user_id, False)
         with self.assertRaises(ValidationError) as caught:
             auth.sign_in("maria", "inventory2")
-        self.assertIn("turned off", caught.exception.message)
+        self.assertIn("inactive", caught.exception.message)
         auth.admin_set_active(admin, staff.user_id, True)
 
         temporary = auth.admin_reset_password(admin, staff.user_id)

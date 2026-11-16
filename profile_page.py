@@ -3,7 +3,7 @@
 * My Dashboard: the signed-in user's own details, counts, and history, with forms to change
   their name and password. This is the staff dashboard.
 * A staff or admin profile opened from the Admin Dashboard: the same details, plus account
-  controls for the admin (role, turn on/off, reset password).
+  controls for the admin (role, activate/deactivate, reset password).
 """
 
 import sqlite3
@@ -117,7 +117,7 @@ def card_header(card, title, note=None):
 
 def role_badge(parent, role, active=True, bg=None):
     if not active:
-        text, fg, soft = "Turned off", COLORS["faint"], COLORS["card_high"]
+        text, fg, soft = "Inactive", COLORS["faint"], COLORS["card_high"]
     elif role == "admin":
         text, fg, soft = "Admin", COLORS["secondary"], COLORS["secondary_soft"]
     else:
@@ -166,13 +166,13 @@ class ProfilePage:
         stat_tiles(right, (
             ("total", f"{mine}Product Changes", "strong"),
             ("ADD", "Products Added", "green"),
-            ("UPDATE", "Updates and Restocks", "primary"),
+            ("UPDATE", "Products Updated", "primary"),
             ("DELETE", "Products Deleted", "red"),
         ), self.stat_vars)
 
         outer, card = panel(right, padx=0, pady=0)
         outer.pack(fill=tk.BOTH, expand=True, pady=(14, 0))
-        top = card_header(card, f"{mine}Activity", "Saved in activity_log, newest first")
+        top = card_header(card, f"{mine}Activity", "Newest first")
         self.history_count = tk.Label(top, bg=COLORS["primary_soft"], fg=COLORS["primary"], font=sans(8, "bold"), padx=6, pady=1)
         self.history_count.pack(side=tk.LEFT, padx=(10, 0))
         self.history = table(card, (
@@ -206,7 +206,7 @@ class ProfilePage:
         facts = tk.Frame(card, bg=COLORS["card"])
         facts.pack(fill=tk.X, pady=(12, 0))
         self.fact_labels = {}
-        for name in ("User ID", "Member since", "Previous sign-in" if self.is_self else "Last sign-in", "Last product change"):
+        for name in ("User ID", "Date Created", "Last Sign In", "Last Update"):
             line = tk.Frame(facts, bg=COLORS["card"])
             line.pack(fill=tk.X, pady=1)
             tk.Label(line, text=name, bg=COLORS["card"], fg=COLORS["muted"], font=sans(8)).pack(side=tk.LEFT)
@@ -318,12 +318,12 @@ class ProfilePage:
         role_badge(self.badge_holder, row["role"], bool(row["is_active"])).pack(side=tk.LEFT)
 
         self.fact_labels["User ID"].configure(text=f"U{row['user_id']:03d}")
-        self.fact_labels["Member since"].configure(text=nice_time(row["created_at"], "--"))
+        self.fact_labels["Date Created"].configure(text=nice_time(row["created_at"], "--"))
         if self.is_self:
-            self.fact_labels["Previous sign-in"].configure(text=nice_time(self.app.user.last_login, "First time"))
+            self.fact_labels["Last Sign In"].configure(text=nice_time(self.app.user.last_login, "None"))
         else:
-            self.fact_labels["Last sign-in"].configure(text=nice_time(row["last_login"]))
-        self.fact_labels["Last product change"].configure(text=nice_time(stats["last_change"], "None yet"))
+            self.fact_labels["Last Sign In"].configure(text=nice_time(row["last_login"]))
+        self.fact_labels["Last Update"].configure(text=nice_time(stats["last_change"], "None"))
 
         self.stat_vars["total"].set(f"{stats['total']:,}")
         self.stat_vars["ADD"].set(f"{stats['ADD']:,}")
@@ -340,8 +340,8 @@ class ProfilePage:
 
         if not self.is_self:
             is_admin = row["role"] == "admin"
-            self.role_button.configure(text="Change to Staff" if is_admin else "Make Admin")
-            self.active_button.configure(text="Turn Off Account" if row["is_active"] else "Turn On Account")
+            self.role_button.configure(text="Set as Staff" if is_admin else "Set as Admin")
+            self.active_button.configure(text="Deactivate Account" if row["is_active"] else "Activate Account")
 
     # ---------------------------------------------------------------- my own profile
 
@@ -398,7 +398,7 @@ class ProfilePage:
     def toggle_role(self):
         new_role = "staff" if self.row["role"] == "admin" else "admin"
         name = self.row["full_name"]
-        if not messagebox.askyesno("Change Role", f"Make {name} {'an Admin' if new_role == 'admin' else 'Staff'}?", parent=self.app.root):
+        if not messagebox.askyesno("Change Role", f"Set {name} as {'Admin' if new_role == 'admin' else 'Staff'}?", parent=self.app.root):
             return
         self.run_admin_action(
             lambda: auth.admin_set_role(self.app.user, self.user_id, new_role),
@@ -408,12 +408,12 @@ class ProfilePage:
     def toggle_active(self):
         turn_on = not self.row["is_active"]
         name = self.row["full_name"]
-        question = f"Turn on the account of {name}?" if turn_on else f"Turn off the account of {name}?\n\nThey will not be able to sign in until it is turned on again."
+        question = f"Activate the account of {name}?" if turn_on else f"Deactivate the account of {name}?\n\nThey will not be able to sign in until it is activated again."
         if not messagebox.askyesno("Account", question, parent=self.app.root):
             return
         self.run_admin_action(
             lambda: auth.admin_set_active(self.app.user, self.user_id, turn_on),
-            f"The account was turned {'on' if turn_on else 'off'}.",
+            f"The account was {'activated' if turn_on else 'deactivated'}.",
         )
 
     def reset_password(self):

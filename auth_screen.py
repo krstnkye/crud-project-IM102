@@ -16,7 +16,7 @@ def sans(size, weight="normal"):
 FEATURES = (
     ("▦", "Track every product", "Add, search, update, and delete items in one screen."),
     ("▲", "Catch low stock early", "Low and out of stock items are flagged right away."),
-    ("⛁", "Saved and accountable", "Every change is saved to inventory.db with who made it."),
+    ("⛁", "Every change is recorded", "Each change is saved with the name of the user who made it."),
 )
 
 
