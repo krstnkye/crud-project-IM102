@@ -9,6 +9,11 @@ from theme import COLORS, FlatButton
 from validation import MIN_PASSWORD_LENGTH, ValidationError, validate_username
 
 
+def border(color):
+    """Border color for an input box, used whether or not the cursor is inside it."""
+    return {"highlightbackground": color, "highlightcolor": color}
+
+
 def sans(size, weight="normal"):
     return (theme.FONT, size, weight)
 
@@ -33,7 +38,7 @@ class AuthScreen:
         self.message_kind = "error"  # "error" (red) or "success" (green) for the message under the form
         self.entries = {}
         # Check the Create Account form while the user types.
-        for name in ("username", "password", "confirm"):
+        for name in ("full_name", "username", "password", "confirm"):
             self.vars[name].trace_add("write", lambda *args: self.live_check())
 
         self.root.title("Sign In - Product Inventory System")
@@ -205,7 +210,7 @@ class AuthScreen:
         tk.Label(top, text=label, bg=COLORS["card"], fg=COLORS["dim"], font=sans(8, "bold")).pack(side=tk.LEFT)
         if hint:
             tk.Label(top, text=hint, bg=COLORS["card"], fg=COLORS["faint"], font=sans(8)).pack(side=tk.RIGHT)
-        box = tk.Frame(wrapper, bg=COLORS["input"], highlightthickness=1, highlightbackground=COLORS["line_high"])
+        box = tk.Frame(wrapper, bg=COLORS["input"], highlightthickness=1, **border(COLORS["line_high"]))
         box.pack(fill=tk.X, pady=(4, 0))
         entry = tk.Entry(
             box, textvariable=self.vars[name], width=36, bg=COLORS["input"], fg=COLORS["text"],
@@ -215,10 +220,11 @@ class AuthScreen:
         entry.pack(fill=tk.X, ipady=7, padx=10)
         entry.secret = secret
         entry.box = box
+        entry.has_problem = False  # True while a red message is shown under this box
         # A small message under the box, shown while typing (for example "Passwords do not match").
         entry.note = tk.Label(wrapper, bg=COLORS["card"], font=sans(8, "bold"), anchor=tk.W, justify=tk.LEFT, wraplength=320)
-        entry.bind("<FocusIn>", lambda e: box.configure(highlightbackground=COLORS["primary"]), add="+")
-        entry.bind("<FocusOut>", lambda e: box.configure(highlightbackground=COLORS["line_high"]), add="+")
+        entry.bind("<FocusIn>", lambda e: box.configure(**border(COLORS["red"] if entry.has_problem else COLORS["primary"])), add="+")
+        entry.bind("<FocusOut>", lambda e: box.configure(**border(COLORS["red"] if entry.has_problem else COLORS["line_high"])), add="+")
         entry.bind("<Return>", lambda event: self.submit())
         entry.bind("<KeyRelease>", self.check_caps_lock, add="+")
         entry.bind("<Key>", lambda event: self.message_kind == "error" and self.error_var.get() and self.clear_error(), add="+")
@@ -231,29 +237,53 @@ class AuthScreen:
         entry = self.entries.get(name)
         if entry is None or not entry.winfo_exists():
             return
+        entry.has_problem = bool(text) and not ok
         if not text or ok:
-            entry.box.configure(highlightbackground=COLORS["primary"] if entry.focus_get() == entry else COLORS["line_high"])
+            entry.box.configure(**border(COLORS["primary"] if entry.focus_get() == entry else COLORS["line_high"]))
         if not text:
             entry.note.pack_forget()
             return
         entry.note.configure(text=("✓  " if ok else "⚠  ") + text, fg=COLORS["green"] if ok else COLORS["red"])
         entry.note.pack(fill=tk.X, pady=(4, 0))
         if not ok:
-            entry.box.configure(highlightbackground=COLORS["red"])
+            entry.box.configure(**border(COLORS["red"]))
 
     def live_check(self):
-        """On Create Account: say right away if the username is taken or the two passwords do not match."""
-        if self.mode != "sign_up" or "confirm" not in self.entries:
+        """Say right away what is wrong while the user types.
+
+        On both tabs: if a password is typed before the username (or full name), ask for that first.
+        On Create Account: also say if the username is taken and if the two passwords do not match.
+        """
+        if "username" not in self.entries:
+            return
+        signing_up = self.mode == "sign_up"
+        password_typed = bool(self.vars["password"].get() or (signing_up and self.vars["confirm"].get()))
+        username = self.vars["username"].get().strip()
+
+        if signing_up and "full_name" in self.entries:
+            if password_typed and not self.vars["full_name"].get().strip():
+                self.set_note("full_name", "Please enter your full name first.")
+            else:
+                self.set_note("full_name")
+
+        if password_typed and not username:
+            self.set_note("username", "Please enter your username first.")
+            if not signing_up:
+                return
+        elif not signing_up:
+            self.set_note("username")
+            return
+        if not signing_up or "confirm" not in self.entries:
             return
 
-        username = self.vars["username"].get().strip()
         try:
             validate_username(username)
             taken = database.get_user_by_username(username) is not None
         except (ValidationError, Exception):
             taken = None  # not a full username yet, or the database could not be read
         if taken is None:
-            self.set_note("username")
+            if username or not password_typed:
+                self.set_note("username")
         elif taken:
             self.set_note("username", "This username is already taken.")
         else:
@@ -286,10 +316,10 @@ class AuthScreen:
         self.show_or_hide_error()
         entry = self.entries.get(field)
         if entry is not None:
-            entry.box.configure(highlightbackground=COLORS["red"])
+            entry.box.configure(**border(COLORS["red"]))
             entry.focus_set()
             entry.select_range(0, tk.END)
-            entry.bind("<FocusOut>", lambda e, b=entry.box: b.configure(highlightbackground=COLORS["line_high"]), add="")
+            entry.bind("<FocusOut>", lambda e, b=entry.box: b.configure(**border(COLORS["line_high"])), add="")
 
     def clear_error(self):
         self.error_var.set("")
