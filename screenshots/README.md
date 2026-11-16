@@ -28,4 +28,7 @@ Pictures of the app used in the project documentation:
 - `26_staff_profile_admin_view.png` - a staff profile opened by the admin, after Reset Password
 - `27_staff_inventory.png` - the inventory as staff (no Delete, no Database Records)
 - `28_staff_dashboard.png` - My Dashboard for a staff account
+- `29_sign_up_live.png` - live messages: username already taken, passwords do not match
+- `30_empty_box_warning.png` - warning for an earlier empty box (Full Name)
+- `31_profile_photo.png` - My Dashboard with a profile photo
 - `erd.png` - the entity-relationship diagram (ERD) of the database, including roles

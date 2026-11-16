@@ -73,6 +73,7 @@ The first time the app runs there are no accounts yet, so it opens on **Create A
 - **Username:** 3 to 20 letters, numbers, dots, or underscores. It must not be used by another account (capital letters do not matter, so `Juan` and `juan` are the same).
 - **Password:** at least 8 characters with at least one letter and one number, cannot be the same as the username, and must be typed twice the same way.
 - **Show password** shows what you typed, and a warning appears when Caps Lock is on.
+- Messages appear while you type. On **Create Account**, the screen says right away if the username is already taken or available, and if the two passwords match. On both screens, if you click or type in a box while an earlier box is still empty, the empty box says it must be filled in first (for example "Please enter your username first.").
 - After 5 wrong passwords in a row, sign in for that username is paused for 30 seconds.
 - After **Create Account**, the app does not sign you in. It goes back to the Sign In screen with your new username filled in, and you sign in with the username and password you just made.
 - An inactive account (deactivated by an admin) cannot sign in until an admin activates it again.
@@ -216,7 +217,7 @@ Deleting a product and signing out ask for confirmation in a pop-up first. If th
 
 ## Automatic Tests
 
-`test_database.py` has 30 tests. They check adding, adding to an existing product, updating, deleting, the totals, the product and sign up input checks, password hashing, sign up (without signing in), sign in, duplicate usernames, the wrong-password pause, the saved activity log, who changed each product, profile numbers, changing your name and password, the Admin and Staff roles, the admin tools (roles, deactivating accounts, password reset), and opening older databases. It uses a temporary database, so your saved products are not touched. Run it from the project folder:
+`test_database.py` has 35 tests. They check adding, adding to an existing product, updating, deleting, the totals, the product and sign up input checks, password hashing, sign up (without signing in), sign in, duplicate usernames, the wrong-password pause, the saved activity log, who changed each product, profile numbers, changing your name and password, the Admin and Staff roles, the admin tools (roles, deactivating accounts, password reset), opening older databases, and adding or removing a profile photo. It uses a temporary database, so your saved products are not touched. Run it from the project folder:
 
 ```bash
 python -m unittest test_database.py
