@@ -1,0 +1,44 @@
+PRODUCT INVENTORY SYSTEM (IM102) - HOW TO RUN
+==============================================
+
+What you need
+-------------
+- Python 3.10 or newer (https://www.python.org/downloads/)
+  On Windows, tick "Add python.exe to PATH" and keep "tcl/tk and IDLE"
+  ticked when installing.
+- No other packages are needed.
+
+Run the app
+-----------
+1. Unzip this file anywhere, for example on your Desktop.
+2. Open the "crud-project-IM102" folder.
+3. Windows: click the folder's address bar, type  cmd  and press Enter.
+   Mac/Linux: open a Terminal in the folder.
+4. Type this and press Enter:
+
+       python main.py
+
+   If that does not work on Windows, try:   py main.py
+   On Mac, try:                              python3 main.py
+
+   You can also open main.py in IDLE and press F5.
+
+First time
+----------
+- The app starts on "Create Account". The FIRST account you make on a
+  laptop becomes the Admin. Every account made after that is Staff.
+- After creating the account, sign in with the same username and password.
+- Your products and accounts are saved in a file called inventory.db that
+  the app creates in this folder. Each laptop has its own inventory.db.
+
+Check that everything works (optional)
+--------------------------------------
+    python -m unittest test_database.py
+
+It should end with "OK" (35 tests).
+
+More help
+---------
+- README.md explains every screen and button.
+- documentation/ has the full project documentation (Word and PDF).
+- Latest version: https://github.com/krstnkye/crud-project-IM102
