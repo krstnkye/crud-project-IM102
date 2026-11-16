@@ -298,6 +298,73 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(auth.sign_in("second", "inventory1").role, "staff")
 
 
+# The smallest real PNG picture: one transparent pixel.
+TINY_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+    "1f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4b00000000049454e44ae426082"
+)
+
+
+class PhotoTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.real_path = database.DB_PATH
+        database.DB_PATH = Path(self.folder.name) / "test_inventory.db"
+        database.initialize_database()
+        self.user = auth.sign_up("Maria Santos", "maria", "inventory1", "inventory1")
+
+    def tearDown(self):
+        database.DB_PATH = self.real_path
+        self.folder.cleanup()
+
+    def picture(self, name, data):
+        path = Path(self.folder.name) / name
+        path.write_bytes(data)
+        return path
+
+    def test_change_and_remove_photo(self):
+        self.assertIsNone(database.get_photo(self.user.user_id))
+        auth.change_photo(self.user, self.picture("me.png", TINY_PNG))
+        self.assertEqual(database.get_photo(self.user.user_id), TINY_PNG)
+        auth.remove_photo(self.user)
+        self.assertIsNone(database.get_photo(self.user.user_id))
+        details = [row["details"] for row in database.get_user_activity(self.user.user_id)]
+        self.assertIn("Changed profile photo.", details)
+        self.assertIn("Removed profile photo.", details)
+
+    def test_gif_is_allowed(self):
+        auth.change_photo(self.user, self.picture("me.gif", b"GIF89a" + b"\x00" * 20))
+        self.assertTrue(database.get_photo(self.user.user_id).startswith(b"GIF89a"))
+
+    def test_wrong_type_is_refused(self):
+        jpeg_start = bytes.fromhex("ffd8ffe0")
+        for name, data in (("me.jpg", jpeg_start + bytes(20)), ("notes.txt", b"hello")):
+            with self.assertRaises(ValidationError) as caught:
+                auth.change_photo(self.user, self.picture(name, data))
+            self.assertIn("PNG or GIF", caught.exception.message)
+        self.assertIsNone(database.get_photo(self.user.user_id))
+
+    def test_too_big_is_refused(self):
+        big = TINY_PNG + b"\x00" * (auth.MAX_PHOTO_BYTES + 1)
+        with self.assertRaises(ValidationError) as caught:
+            auth.change_photo(self.user, self.picture("big.png", big))
+        self.assertIn("too big", caught.exception.message)
+
+    def test_old_database_gets_photo_column(self):
+        database.DB_PATH = Path(self.folder.name) / "old.db"
+        with database.database_connection() as connection:
+            connection.execute(
+                "CREATE TABLE users (user_id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, "
+                "full_name TEXT NOT NULL, password_hash TEXT NOT NULL, created_at TEXT NOT NULL, last_login TEXT)"
+            )
+            connection.execute("INSERT INTO users (username, full_name, password_hash, created_at) VALUES ('old', 'Old User', 'x', '2026-01-01')")
+        database.initialize_database()
+        with database.database_connection() as connection:
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)")}
+        self.assertIn("photo", columns)
+        self.assertIsNone(database.get_photo(1))
+
+
 class InputCheckTests(unittest.TestCase):
     def test_good_quantities(self):
         self.assertEqual(parse_quantity("25"), 25)

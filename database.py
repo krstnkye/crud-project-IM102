@@ -70,7 +70,8 @@ def initialize_database():
                 created_at TEXT NOT NULL,
                 last_login TEXT,
                 role TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('admin', 'staff')),
-                is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1))
+                is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+                photo BLOB
             )
             """
         )
@@ -84,6 +85,9 @@ def initialize_database():
             connection.execute(
                 "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1))"
             )
+        if "photo" not in user_columns:
+            # Profile photos are saved inside inventory.db, so no extra folder is needed.
+            connection.execute("ALTER TABLE users ADD COLUMN photo BLOB")
         has_admin = connection.execute("SELECT 1 FROM users WHERE role = 'admin' AND is_active = 1").fetchone()
         if not has_admin:
             connection.execute(
@@ -144,6 +148,19 @@ def get_user_by_id(user_id):
             "SELECT user_id, username, full_name, password_hash, created_at, last_login, role, is_active FROM users WHERE user_id = ?",
             (user_id,),
         ).fetchone()
+
+
+def get_photo(user_id):
+    """The user's profile photo as bytes (PNG or GIF), or None if they have not added one."""
+    with database_connection() as connection:
+        row = connection.execute("SELECT photo FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    return bytes(row["photo"]) if row and row["photo"] else None
+
+
+def set_photo(user_id, data):
+    """Save a profile photo (bytes), or remove it when data is None."""
+    with database_connection() as connection:
+        connection.execute("UPDATE users SET photo = ? WHERE user_id = ?", (sqlite3.Binary(data) if data else None, user_id))
 
 
 def set_role(user_id, role):

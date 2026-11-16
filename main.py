@@ -10,7 +10,7 @@ import database
 import theme
 from auth_screen import AuthScreen
 from admin_page import AdminPage
-from profile_page import ProfilePage, nice_time, role_badge
+from profile_page import ProfilePage, draw_avatar, nice_time, role_badge
 from theme import COLORS, FlatButton
 from validation import ValidationError, parse_price, parse_quantity, validate_product
 
@@ -272,8 +272,11 @@ class InventoryApp:
         row.pack(fill=tk.X)
         avatar = tk.Canvas(row, width=34, height=34, bg=COLORS["card"], highlightthickness=0)
         avatar.pack(side=tk.LEFT)
-        avatar.create_oval(1, 1, 33, 33, fill=COLORS["primary_soft"], outline=COLORS["primary_line"])
-        avatar.create_text(17, 17, text=self.user.initials, fill=COLORS["primary"], font=sans(10, "bold"))
+        try:
+            photo = database.get_photo(self.user.user_id)
+        except sqlite3.DatabaseError:
+            photo = None
+        draw_avatar(avatar, 34, self.user.full_name, photo)
         names = tk.Frame(row, bg=COLORS["card"])
         names.pack(side=tk.LEFT, padx=(8, 0), fill=tk.X, expand=True)
         full_name = self.user.full_name if len(self.user.full_name) <= 18 else self.user.full_name[:17] + "…"
@@ -354,12 +357,12 @@ class InventoryApp:
         if "Admin Dashboard" in self.nav_widgets:
             self.paint_nav("Admin Dashboard", page == "admin" or (page == "profile" and user_id is not None))
 
-    def on_profile_changed(self):
-        """The user's name changed: update the window title, side menu, and header."""
+    def on_profile_changed(self, message="Your name was saved."):
+        """The user's name or photo changed: update the window title, side menu, and header."""
         self.root.title(f"{WINDOW_TITLE} - {self.user.full_name}")
         def redraw():
             self.rebuild_screen()
-            self.show_toast("Your name was saved.")
+            self.show_toast(message)
         self.root.after_idle(redraw)
 
     def draw_health(self):
