@@ -9,6 +9,14 @@ from theme import COLORS, FlatButton
 from validation import MIN_PASSWORD_LENGTH, ValidationError, validate_username
 
 
+# Shown under an earlier box that is still empty when the user moves on to a later box.
+FILL_FIRST = {
+    "full_name": "Please enter your full name first.",
+    "username": "Please enter your username first.",
+    "password": "Please enter your password first.",
+}
+
+
 def border(color):
     """Border color for an input box, used whether or not the cursor is inside it."""
     return {"highlightbackground": color, "highlightcolor": color}
@@ -37,9 +45,10 @@ class AuthScreen:
         self.error_var = tk.StringVar()
         self.message_kind = "error"  # "error" (red) or "success" (green) for the message under the form
         self.entries = {}
+        self.reached = -1
         # Check the Create Account form while the user types.
         for name in ("full_name", "username", "password", "confirm"):
-            self.vars[name].trace_add("write", lambda *args: self.live_check())
+            self.vars[name].trace_add("write", lambda *args, n=name: self.reach(n))
 
         self.root.title("Sign In - Product Inventory System")
         self.build()
@@ -139,6 +148,7 @@ class AuthScreen:
         for widget in self.form_area.winfo_children():
             widget.destroy()
         self.entries = {}
+        self.reached = -1
         area = self.form_area
         signing_up = self.mode == "sign_up"
 
@@ -228,6 +238,7 @@ class AuthScreen:
         entry.bind("<Return>", lambda event: self.submit())
         entry.bind("<KeyRelease>", self.check_caps_lock, add="+")
         entry.bind("<Key>", lambda event: self.message_kind == "error" and self.error_var.get() and self.clear_error(), add="+")
+        entry.bind("<FocusIn>", lambda e, n=name: self.reach(n), add="+")
         self.entries[name] = entry
 
     # ---------------------------------------------------------------- behavior
@@ -248,32 +259,50 @@ class AuthScreen:
         if not ok:
             entry.box.configure(**border(COLORS["red"]))
 
+    def reach(self, name):
+        """The user clicked into or typed in this box: earlier empty boxes may now need a warning."""
+        names = list(self.entries)
+        if name in names:
+            self.reached = max(self.reached, names.index(name))
+        self.live_check()
+
     def live_check(self):
         """Say right away what is wrong while the user types.
 
-        On both tabs: if a password is typed before the username (or full name), ask for that first.
-        On Create Account: also say if the username is taken and if the two passwords do not match.
+        On both tabs: when the user moves on to a later box, every earlier box that is still empty
+        says it must be filled in first. On Create Account: also say if the username is taken and
+        if the two passwords match.
         """
         if "username" not in self.entries:
             return
         signing_up = self.mode == "sign_up"
-        password_typed = bool(self.vars["password"].get() or (signing_up and self.vars["confirm"].get()))
+        names = list(self.entries)
+        focused = self.root.focus_get()
+        # Warn about boxes before the one the cursor is in (or before the furthest box reached).
+        current = next((i for i, n in enumerate(names) if self.entries[n] is focused), self.reached)
+
+        def needs_filling(name):
+            if name not in FILL_FIRST or name not in self.entries:
+                return False
+            value = self.vars[name].get()
+            empty = not (value if name in ("password", "confirm") else value.strip())
+            return empty and names.index(name) < current
+
+        for name in ("full_name", "password"):
+            if name in self.entries:
+                if needs_filling(name):
+                    self.set_note(name, FILL_FIRST[name])
+                else:
+                    self.set_note(name)
+
         username = self.vars["username"].get().strip()
-
-        if signing_up and "full_name" in self.entries:
-            if password_typed and not self.vars["full_name"].get().strip():
-                self.set_note("full_name", "Please enter your full name first.")
-            else:
-                self.set_note("full_name")
-
-        if password_typed and not username:
-            self.set_note("username", "Please enter your username first.")
-            if not signing_up:
-                return
-        elif not signing_up:
+        if needs_filling("username"):
+            self.set_note("username", FILL_FIRST["username"])
+        elif not username or not signing_up:
             self.set_note("username")
-            return
-        if not signing_up or "confirm" not in self.entries:
+        if not signing_up or "confirm" not in self.entries or not username:
+            if signing_up and "confirm" in self.entries:
+                self.check_confirm()
             return
 
         try:
@@ -282,16 +311,18 @@ class AuthScreen:
         except (ValidationError, Exception):
             taken = None  # not a full username yet, or the database could not be read
         if taken is None:
-            if username or not password_typed:
-                self.set_note("username")
+            self.set_note("username")
         elif taken:
             self.set_note("username", "This username is already taken.")
         else:
             self.set_note("username", "This username is available.", ok=True)
 
+        self.check_confirm()
+
+    def check_confirm(self):
         password = self.vars["password"].get()
         confirm = self.vars["confirm"].get()
-        if not confirm:
+        if not confirm or not password:
             self.set_note("confirm")
         elif confirm != password:
             self.set_note("confirm", "Passwords do not match.")
