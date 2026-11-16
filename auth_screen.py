@@ -6,7 +6,7 @@ import auth
 import database
 import theme
 from theme import COLORS, FlatButton
-from validation import MIN_PASSWORD_LENGTH, ValidationError
+from validation import MIN_PASSWORD_LENGTH, ValidationError, validate_username
 
 
 def sans(size, weight="normal"):
@@ -32,6 +32,9 @@ class AuthScreen:
         self.error_var = tk.StringVar()
         self.message_kind = "error"  # "error" (red) or "success" (green) for the message under the form
         self.entries = {}
+        # Check the Create Account form while the user types.
+        for name in ("username", "password", "confirm"):
+            self.vars[name].trace_add("write", lambda *args: self.live_check())
 
         self.root.title("Sign In - Product Inventory System")
         self.build()
@@ -149,7 +152,7 @@ class AuthScreen:
             self.add_field("full_name", "Full Name")
         self.add_field("username", "Username", hint="3-20 letters, numbers, . or _" if signing_up else None)
         self.add_field("password", "Password", secret=True,
-                       hint=f"{MIN_PASSWORD_LENGTH}+ characters, a letter and a number" if signing_up else None)
+                       hint=f"{MIN_PASSWORD_LENGTH} or more, with a letter and a number" if signing_up else None)
         if signing_up:
             self.add_field("confirm", "Confirm Password", secret=True)
 
@@ -192,6 +195,7 @@ class AuthScreen:
         if self.mode == "sign_in" and self.vars["username"].get():
             first = "password"
         self.root.after_idle(lambda: self.entries[first].winfo_exists() and self.entries[first].focus_set())
+        self.live_check()
 
     def add_field(self, name, label, secret=False, hint=None):
         wrapper = tk.Frame(self.form_area, bg=COLORS["card"])
@@ -211,6 +215,8 @@ class AuthScreen:
         entry.pack(fill=tk.X, ipady=7, padx=10)
         entry.secret = secret
         entry.box = box
+        # A small message under the box, shown while typing (for example "Passwords do not match").
+        entry.note = tk.Label(wrapper, bg=COLORS["card"], font=sans(8, "bold"), anchor=tk.W, justify=tk.LEFT, wraplength=320)
         entry.bind("<FocusIn>", lambda e: box.configure(highlightbackground=COLORS["primary"]), add="+")
         entry.bind("<FocusOut>", lambda e: box.configure(highlightbackground=COLORS["line_high"]), add="+")
         entry.bind("<Return>", lambda event: self.submit())
@@ -219,6 +225,48 @@ class AuthScreen:
         self.entries[name] = entry
 
     # ---------------------------------------------------------------- behavior
+
+    def set_note(self, name, text="", ok=False):
+        """Show (or hide, when text is empty) the small message under one box."""
+        entry = self.entries.get(name)
+        if entry is None or not entry.winfo_exists():
+            return
+        if not text or ok:
+            entry.box.configure(highlightbackground=COLORS["primary"] if entry.focus_get() == entry else COLORS["line_high"])
+        if not text:
+            entry.note.pack_forget()
+            return
+        entry.note.configure(text=("✓  " if ok else "⚠  ") + text, fg=COLORS["green"] if ok else COLORS["red"])
+        entry.note.pack(fill=tk.X, pady=(4, 0))
+        if not ok:
+            entry.box.configure(highlightbackground=COLORS["red"])
+
+    def live_check(self):
+        """On Create Account: say right away if the username is taken or the two passwords do not match."""
+        if self.mode != "sign_up" or "confirm" not in self.entries:
+            return
+
+        username = self.vars["username"].get().strip()
+        try:
+            validate_username(username)
+            taken = database.get_user_by_username(username) is not None
+        except (ValidationError, Exception):
+            taken = None  # not a full username yet, or the database could not be read
+        if taken is None:
+            self.set_note("username")
+        elif taken:
+            self.set_note("username", "This username is already taken.")
+        else:
+            self.set_note("username", "This username is available.", ok=True)
+
+        password = self.vars["password"].get()
+        confirm = self.vars["confirm"].get()
+        if not confirm:
+            self.set_note("confirm")
+        elif confirm != password:
+            self.set_note("confirm", "Passwords do not match.")
+        else:
+            self.set_note("confirm", "Passwords match.", ok=True)
 
     def show_or_hide_error(self):
         if not self.error_label.winfo_exists():
