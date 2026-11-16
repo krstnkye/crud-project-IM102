@@ -1,13 +1,16 @@
-import re
 import sqlite3
 import sys
 import tkinter as tk
+import traceback
 from datetime import datetime
 from tkinter import messagebox, ttk
 
+import auth
 import database
 import theme
+from auth_screen import AuthScreen
 from theme import COLORS, FlatButton
+from validation import ValidationError, parse_price, parse_quantity, validate_product
 
 
 CATEGORIES = ("School Supplies", "Food", "Drinks", "Cleaning", "Electronics", "Other")
@@ -25,25 +28,15 @@ TABLE_COLUMNS = {
 
 TABLE_COLUMNS_BY_KEY = {sort_key: heading for heading, width, anchor, sort_key in TABLE_COLUMNS.values() if sort_key != "quantity" or heading == "Stock"}
 
-LOG_COLORS = {"BOOT": "primary", "ADD": "green", "RESTOCK": "green", "UPDATE": "primary", "DELETE": "red", "ALERT": "amber", "ERROR": "red", "THEME": "muted"}
+LOG_COLORS = {
+    "BOOT": "primary", "ADD": "green", "RESTOCK": "green", "UPDATE": "primary", "DELETE": "red", "ALERT": "amber",
+    "ERROR": "red", "THEME": "muted", "SIGN IN": "secondary", "SIGN UP": "secondary", "SIGN OUT": "muted",
+}
 
+WINDOW_TITLE = "Product Inventory System"
 
-QUANTITY_PATTERN = re.compile(r"-?\d+", re.ASCII)
-PRICE_PATTERN = re.compile(r"-?(\d+(\.\d{1,2})?|\.\d{1,2})", re.ASCII)
-MAX_NAME_LENGTH = 60
-MAX_CATEGORY_LENGTH = 30
-
-
-def parse_quantity(text):
-    """Return the quantity as a whole number, or None if it is not a plain whole number."""
-    text = text.strip()
-    return int(text) if QUANTITY_PATTERN.fullmatch(text) else None
-
-
-def parse_price(text):
-    """Return the price as a number with at most 2 decimal places, or None if it is not valid."""
-    text = text.strip()
-    return float(text) if PRICE_PATTERN.fullmatch(text) else None
+# parse_quantity and parse_price are imported above so older code and tests can keep using main.parse_price.
+__all__ = ["InventoryApp", "main", "parse_price", "parse_quantity"]
 
 
 def sans(size, weight="normal"):
@@ -63,16 +56,23 @@ def short_list(products):
     return text if len(text) <= 38 else text[:37] + "…"
 
 
+def log_time(created_at):
+    """Show today's saved actions as 14:05:09 and older ones as Nov 15 14:05."""
+    try:
+        moment = datetime.fromisoformat(created_at)
+    except (TypeError, ValueError):
+        return "--:--"
+    if moment.date() == datetime.now().date():
+        return moment.strftime("%H:%M:%S")
+    return moment.strftime("%b %d %H:%M")
+
+
 class InventoryApp:
-    def __init__(self, root):
+    def __init__(self, root, user, on_sign_out=None):
         self.root = root
-        self.root.title("Product Inventory System")
-        self.root.geometry("1280x720")
-        self.root.minsize(1100, 660)
-        try:
-            self.root.state("zoomed")  # open maximized on Windows
-        except tk.TclError:
-            pass
+        self.user = user
+        self.on_sign_out = on_sign_out
+        self.root.title(f"{WINDOW_TITLE} - {user.full_name}")
 
         self.selected_product_id = None
         self.products = []
@@ -113,7 +113,11 @@ class InventoryApp:
         self.db_size_var = tk.StringVar(value="0 KB")
         self.index_var = tk.StringVar()
 
-        theme.load_fonts(self.root)
+        self.log_entries = [
+            (log_time(row["created_at"]), row["action"], row["details"], row["username"])
+            for row in database.get_recent_activity(40)
+        ]
+
         theme.apply_ttk_theme(self.root)
         self.build_interface()
         self.bind_shortcuts()
@@ -124,7 +128,7 @@ class InventoryApp:
         self.unit_price_var.trace_add("write", self.update_item_total)
         self.search_var.trace_add("write", lambda *args: self.render_table())
 
-        self.log("BOOT", f"Database ready. {len(self.products)} product(s) loaded from inventory.db.")
+        self.log("BOOT", f"Welcome, {user.full_name}. {len(self.products)} product(s) loaded from inventory.db.")
         low = [p for p in self.products if p["quantity"] < database.LOW_STOCK_THRESHOLD]
         if low:
             self.log("ALERT", f"{len(low)} product(s) below {database.LOW_STOCK_THRESHOLD} pieces. Restock suggested.")
@@ -222,8 +226,9 @@ class InventoryApp:
 
         bottom = tk.Frame(bar, bg=COLORS["sidebar"], padx=12, pady=12)
         bottom.pack(side=tk.BOTTOM, fill=tk.X)
+        self.build_user_card(bottom)
         box = tk.Frame(bottom, bg=COLORS["card"], padx=10, pady=8, highlightthickness=1, highlightbackground=COLORS["line"])
-        box.pack(fill=tk.X)
+        box.pack(fill=tk.X, pady=(10, 0))
         row = tk.Frame(box, bg=COLORS["card"])
         row.pack(fill=tk.X)
         self.caps(row, "SQLite engine").pack(side=tk.LEFT)
@@ -238,6 +243,26 @@ class InventoryApp:
         row = tk.Frame(bottom, bg=COLORS["sidebar"])
         row.pack(fill=tk.X, pady=(8, 0))
         self.caps(row, f"Python {sys.version_info.major}.{sys.version_info.minor} · Tkinter", bg=COLORS["sidebar"], weight="normal").pack(side=tk.LEFT)
+
+    def build_user_card(self, parent):
+        """Who is signed in, with a Sign Out button."""
+        card = tk.Frame(parent, bg=COLORS["card"], padx=10, pady=10, highlightthickness=1, highlightbackground=COLORS["line"])
+        card.pack(fill=tk.X)
+        row = tk.Frame(card, bg=COLORS["card"])
+        row.pack(fill=tk.X)
+        avatar = tk.Canvas(row, width=34, height=34, bg=COLORS["card"], highlightthickness=0)
+        avatar.pack(side=tk.LEFT)
+        avatar.create_oval(1, 1, 33, 33, fill=COLORS["primary_soft"], outline=COLORS["primary_line"])
+        avatar.create_text(17, 17, text=self.user.initials, fill=COLORS["primary"], font=sans(10, "bold"))
+        names = tk.Frame(row, bg=COLORS["card"])
+        names.pack(side=tk.LEFT, padx=(8, 0), fill=tk.X, expand=True)
+        full_name = self.user.full_name if len(self.user.full_name) <= 18 else self.user.full_name[:17] + "…"
+        tk.Label(names, text=full_name, bg=COLORS["card"], fg=COLORS["strong"], font=sans(9, "bold"), anchor=tk.W).pack(fill=tk.X)
+        tk.Label(names, text=f"@{self.user.username}", bg=COLORS["card"], fg=COLORS["muted"], font=sans(8), anchor=tk.W).pack(fill=tk.X)
+        FlatButton(
+            card, "Sign Out", self.sign_out, COLORS["card_high"], COLORS["dim"], COLORS["red_soft"],
+            font_size=8, pady=5, border=COLORS["line_high"], hover_fg=COLORS["red"],
+        ).pack(fill=tk.X, pady=(10, 0))
 
     def nav_item(self, parent, icon, text, command, active):
         bg = COLORS["card_high"] if active else COLORS["sidebar"]
@@ -281,7 +306,7 @@ class InventoryApp:
         pill = tk.Frame(left, bg=COLORS["card_high"], padx=8, pady=3, highlightthickness=1, highlightbackground=COLORS["line_high"])
         pill.pack(side=tk.LEFT, padx=(16, 0))
         tk.Label(pill, text="●", bg=COLORS["card_high"], fg=COLORS["primary"], font=sans(8)).pack(side=tk.LEFT)
-        tk.Label(pill, text=" Connected to inventory.db", bg=COLORS["card_high"], fg=COLORS["text"], font=sans(8)).pack(side=tk.LEFT)
+        tk.Label(pill, text=f" Signed in as @{self.user.username}", bg=COLORS["card_high"], fg=COLORS["text"], font=sans(8)).pack(side=tk.LEFT)
 
         right = tk.Frame(header, bg=COLORS["header"])
         right.pack(side=tk.RIGHT, fill=tk.Y)
@@ -326,7 +351,7 @@ class InventoryApp:
             ("Registered Products", "▦", "primary", self.total_products_var, self.total_units_var, "● Saved in inventory.db", "primary"),
             ("Low Stock Alerts", "▲", "amber", self.low_stock_var, self.low_stock_unit_var, self.low_stock_detail_var, "amber"),
             ("Out of Stock", "⊘", "red", self.out_stock_var, self.out_stock_unit_var, self.out_stock_detail_var, "red"),
-            ("SQLite Database", "⛁", "primary", self.db_size_var, None, f"products table · SQLite v{sqlite3.sqlite_version}", "muted"),
+            ("SQLite Database", "⛁", "primary", self.db_size_var, None, f"3 tables · SQLite v{sqlite3.sqlite_version}", "muted"),
         ]
 
         for index, (label, icon, color, value, extra, note, note_color) in enumerate(cards):
@@ -488,7 +513,7 @@ class InventoryApp:
         top = tk.Frame(log_card, bg=COLORS["card"])
         top.pack(fill=tk.X)
         self.caps(top, "Activity Log", color=COLORS["primary"], size=8).pack(side=tk.LEFT)
-        self.caps(top, "This session", weight="normal").pack(side=tk.RIGHT)
+        self.caps(top, "Saved in inventory.db", weight="normal").pack(side=tk.RIGHT)
 
         self.log_box = tk.Text(
             log_card,
@@ -509,7 +534,7 @@ class InventoryApp:
         self.log_box.pack(fill=tk.BOTH, expand=True)
         for name in set(LOG_COLORS.values()):
             self.log_box.tag_configure(name, foreground=COLORS[name], font=sans(9, "bold"))
-        self.log_box.tag_configure("time", foreground=COLORS["faint"])
+        self.log_box.tag_configure("time", foreground=COLORS["faint"], font=sans(9))
         self.log_box.configure(state=tk.DISABLED)
         for entry in self.log_entries:
             self.write_log_line(*entry)
@@ -699,19 +724,29 @@ class InventoryApp:
             self.root.after_cancel(self.toast_job)
         self.toast_job = self.root.after(3200, self.toast.place_forget)
 
-    def log(self, kind, message):
-        entry = (datetime.now().strftime("%H:%M:%S"), kind, message)
+    def log(self, kind, message, save=False):
+        """Write a line in the Activity Log. Product changes are also saved with the user's name."""
+        who = None
+        if save:
+            who = self.user.username
+            try:
+                database.add_activity(self.user.user_id, kind, message)
+            except sqlite3.DatabaseError:
+                pass  # the change itself was saved; losing one history line should not stop the user
+        entry = (datetime.now().strftime("%H:%M:%S"), kind, message, who)
         self.log_entries.append(entry)
         self.log_entries = self.log_entries[-100:]
         self.write_log_line(*entry)
 
-    def write_log_line(self, time_text, kind, message):
+    def write_log_line(self, time_text, kind, message, who=None):
         self.log_box.configure(state=tk.NORMAL)
         if self.log_box.index("end-1c") != "1.0":
             self.log_box.insert(tk.END, "\n")
         self.log_box.insert(tk.END, f"{time_text} ", "time")
         self.log_box.insert(tk.END, f"[{kind}]", LOG_COLORS.get(kind, "muted"))
         self.log_box.insert(tk.END, f" {message}")
+        if who:
+            self.log_box.insert(tk.END, f"  · @{who}", "time")
         self.log_box.see(tk.END)
         self.log_box.configure(state=tk.DISABLED)
 
@@ -767,7 +802,7 @@ class InventoryApp:
         self.ins_tiles["Stock"].configure(text=f"{quantity:,} pcs", fg=color)
         self.ins_tiles["Unit Price"].configure(text=peso(product["unit_price"]), fg=COLORS["text"])
         self.ins_tiles["Total Value"].configure(text=peso(product["total"]), fg=COLORS["text"])
-        self.ins_tiles["Status"].configure(text=status, fg=color)
+        self.ins_tiles["Status"].configure(text={"red": "Empty", "amber": "Low", "green": "OK"}[key], fg=color)
 
         # Stock meter: this product's stock compared with the biggest stock in the list.
         biggest = max(max(p["quantity"] for p in self.products), database.LOW_STOCK_THRESHOLD * 2)
@@ -783,6 +818,26 @@ class InventoryApp:
     def set_category_filter(self, category):
         self.category_filter = category
         self.render_table()
+
+    def sign_out(self):
+        if not messagebox.askyesno("Sign Out", "Do you want to sign out?", parent=self.root):
+            return
+        try:
+            auth.sign_out(self.user)
+        except sqlite3.DatabaseError:
+            pass
+        if self.toast_job:
+            self.root.after_cancel(self.toast_job)
+            self.toast_job = None
+        for sequence in ("<Escape>", "<Control-f>", "<Control-F>", "<Control-l>", "<Control-L>"):
+            self.root.unbind(sequence)
+        if self.viewer_is_open():
+            self.viewer.root.destroy()
+        self.viewer = None
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        if self.on_sign_out:
+            self.on_sign_out()
 
     def toggle_theme(self):
         """Switch between dark and light mode by rebuilding the screen with the new colors."""
@@ -831,52 +886,24 @@ class InventoryApp:
     # ------------------------------------------------------------------- CRUD
 
     def validate_inputs(self):
-        product_name = self.product_name_var.get().strip()
-        category = self.category_var.get().strip()
-        quantity_text = self.quantity_var.get().strip()
-        price_text = self.unit_price_var.get().strip()
-
+        """Check the form. Shows a red message and returns None if something is wrong."""
         self.error_var.set("")
-
-        if not product_name:
-            self.show_error("Please enter a product name.", self.name_entry)
+        try:
+            return validate_product(
+                self.product_name_var.get(), self.category_var.get(), self.quantity_var.get(), self.unit_price_var.get()
+            )
+        except ValidationError as error:
+            fields = {"name": self.name_entry, "category": self.category_entry, "quantity": self.quantity_entry, "price": self.price_entry}
+            self.show_error(error.message, fields.get(error.field))
             return None
 
-        if len(product_name) > MAX_NAME_LENGTH:
-            self.show_error(f"Product name must be {MAX_NAME_LENGTH} characters or less.", self.name_entry)
-            return None
-
-        if not category:
-            self.show_error("Please enter a category.", self.category_entry)
-            return None
-
-        if len(category) > MAX_CATEGORY_LENGTH:
-            self.show_error(f"Category must be {MAX_CATEGORY_LENGTH} characters or less.", self.category_entry)
-            return None
-
-        quantity = parse_quantity(quantity_text)
-        if quantity is None:
-            self.show_error("Quantity must be a whole number.", self.quantity_entry)
-            return None
-
-        if quantity < 0:
-            self.show_error("Quantity cannot be negative.", self.quantity_entry)
-            return None
-
-        if quantity > database.MAX_QUANTITY:
-            self.show_error(f"Quantity cannot be more than {database.MAX_QUANTITY:,} pcs.", self.quantity_entry)
-            return None
-
-        unit_price = parse_price(price_text)
-        if unit_price is None or unit_price < 0:
-            self.show_error("Please enter a valid price, like 25 or 8.50.", self.price_entry)
-            return None
-
-        if unit_price > database.MAX_PRICE:
-            self.show_error(f"Price cannot be more than {peso(database.MAX_PRICE)}.", self.price_entry)
-            return None
-
-        return product_name, category, quantity, unit_price
+    def database_problem(self, action):
+        self.log("ERROR", f"Could not {action}. The database may be open in another program.")
+        messagebox.showerror(
+            "Database Problem",
+            f"Could not {action}.\n\nThe database file may be locked by another program. Close it and try again.",
+            parent=self.root,
+        )
 
     def save_from_keyboard(self):
         if self.selected_product_id is None:
@@ -892,8 +919,7 @@ class InventoryApp:
         try:
             result = database.add_product(*values)
         except sqlite3.DatabaseError:
-            self.log("ERROR", "Unable to save changes.")
-            messagebox.showerror("Save Problem", "Unable to save changes. Please try again.")
+            self.database_problem("save the product")
             return
 
         if result == "too_much":
@@ -906,10 +932,10 @@ class InventoryApp:
         self.clear_fields()
         name, category, quantity, unit_price = values
         if result == "restocked":
-            self.log("RESTOCK", f"{name} already exists, so {quantity} pcs were added to its stock.")
+            self.log("RESTOCK", f"{name} already exists, so {quantity:,} pcs were added to its stock.", save=True)
             self.show_toast("Same product already exists, so its quantity was increased.", "info")
         else:
-            self.log("ADD", f"Added {name} ({category}), {quantity} pcs @ {peso(unit_price)}.")
+            self.log("ADD", f"Added {name} ({category}), {quantity:,} pcs @ {peso(unit_price)}.", save=True)
             self.show_toast("Product added successfully.")
 
     def update_product(self):
@@ -925,17 +951,21 @@ class InventoryApp:
         try:
             result = database.update_product(product_id, *values)
         except sqlite3.DatabaseError:
-            self.log("ERROR", "Unable to save changes.")
-            messagebox.showerror("Save Problem", "Unable to save changes. Please try again.")
+            self.database_problem("update the product")
             return
 
         if result == "duplicate":
             self.show_error("Another product already has the same name, category, and price.", self.name_entry)
             return
+        if result == "missing":
+            self.refresh_data()
+            self.clear_fields()
+            self.show_toast("That product no longer exists. The list was refreshed.", "error")
+            return
 
         self.refresh_data()
         self.clear_fields()
-        self.log("UPDATE", f"P{product_id:03d} {values[0]} updated: {values[2]} pcs @ {peso(values[3])}.")
+        self.log("UPDATE", f"P{product_id:03d} {values[0]} updated: {values[2]:,} pcs @ {peso(values[3])}.", save=True)
         self.show_toast("Product updated successfully.")
 
     def delete_product(self):
@@ -948,21 +978,25 @@ class InventoryApp:
         name = product["product_name"] if product else self.product_name_var.get()
         confirmed = messagebox.askyesno(
             "Delete Product",
-            f"Are you sure you want to delete \"{name}\"?",
+            f"Are you sure you want to delete \"{name}\"?\n\nThis cannot be undone.",
+            icon=messagebox.WARNING,
+            parent=self.root,
         )
         if not confirmed:
             return
 
         try:
-            database.delete_product(product_id)
+            deleted = database.delete_product(product_id)
         except sqlite3.DatabaseError:
-            self.log("ERROR", "Unable to save changes.")
-            messagebox.showerror("Save Problem", "Unable to save changes. Please try again.")
+            self.database_problem("delete the product")
             return
 
         self.refresh_data()
         self.clear_fields()
-        self.log("DELETE", f"P{product_id:03d} {name} was deleted.")
+        if not deleted:
+            self.show_toast("That product was already deleted. The list was refreshed.", "error")
+            return
+        self.log("DELETE", f"P{product_id:03d} {name} was deleted.", save=True)
         self.show_toast("Product deleted successfully.")
 
     def clear_fields(self):
@@ -1139,9 +1173,56 @@ class InventoryApp:
             self.empty_label.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
 
+def setup_window(root):
+    root.title(WINDOW_TITLE)
+    root.geometry("1280x720")
+    root.minsize(1100, 660)
+    try:
+        root.state("zoomed")  # open maximized on Windows
+    except tk.TclError:
+        pass
+    theme.load_fonts(root)
+    theme.apply_ttk_theme(root)
+
+
+def install_error_handler(root):
+    """Show a friendly message instead of a silent crash if something unexpected goes wrong."""
+
+    def report(exc_type, exc_value, exc_traceback):
+        traceback.print_exception(exc_type, exc_value, exc_traceback)
+        if issubclass(exc_type, sqlite3.DatabaseError):
+            text = "The database could not be read or saved. Close any other program using inventory.db and try again."
+        else:
+            text = "Something went wrong, but your saved products are safe. Please try that again."
+        messagebox.showerror("Unexpected Problem", f"{text}\n\nDetails: {exc_value}", parent=root)
+
+    root.report_callback_exception = report
+
+
 def main():
     root = tk.Tk()
-    InventoryApp(root)
+    setup_window(root)
+    install_error_handler(root)
+
+    try:
+        database.initialize_database()
+    except sqlite3.DatabaseError as error:
+        messagebox.showerror("Database Problem", f"inventory.db could not be opened.\n\nDetails: {error}", parent=root)
+        root.destroy()
+        return
+
+    def show_sign_in():
+        root.title(f"Sign In - {WINDOW_TITLE}")
+        AuthScreen(root, on_success=show_inventory, mode="sign_in" if database.count_users() else "sign_up")
+
+    def show_inventory(user, new_account=False):
+        app = InventoryApp(root, user, on_sign_out=show_sign_in)
+        if new_account:
+            app.show_toast(f"Account created. Welcome, {user.full_name}!")
+        else:
+            app.show_toast(f"Signed in as {user.full_name}.", "info")
+
+    show_sign_in()
     root.mainloop()
 
 

@@ -14,4 +14,11 @@ Pictures of the app used in the project documentation:
 - `11_delete_confirm.png` - asking to confirm before deleting
 - `12_delete_done.png` - the product list after deleting
 - `13_db_records.png` - the database records window
+- `15_sign_in.png` - the Sign In screen
+- `16_sign_in_error.png` - error for a wrong password
+- `17_sign_up.png` - the Create Account screen
+- `18_sign_up_error.png` - error when the two passwords do not match
+- `19_db_users.png` - the users table (only password hashes are saved)
+- `20_db_activity_log.png` - the activity_log table (who did what)
+- `21_sign_in_light.png` - the Sign In screen in light mode
 - `erd.png` - the entity-relationship diagram (ERD) of the database
