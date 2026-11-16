@@ -15,7 +15,7 @@ def sans(size, weight="normal"):
 
 FEATURES = (
     ("▦", "Track every product", "Add, search, update, and delete items in one screen."),
-    ("▲", "Catch low stock early", "Low and out of stock items are flagged right away."),
+    ("▲", "Catch low stock early", "Low and out of stock items are shown right away."),
     ("⛁", "Every change is recorded", "Each change is saved with the name of the user who made it."),
 )
 
@@ -66,7 +66,7 @@ class AuthScreen:
         ).pack(anchor=tk.W)
         tk.Label(
             inner,
-            text="Keep your stock organized, see what needs restocking, and know who changed what.",
+            text="Keep your stock organized, see what is running low, and know who changed what.",
             bg=COLORS["sidebar"], fg=COLORS["muted"], font=sans(10), justify=tk.LEFT, wraplength=360,
         ).pack(anchor=tk.W, pady=(10, 26))
 
@@ -108,7 +108,7 @@ class AuthScreen:
         self.build_fields()
 
         tk.Label(
-            holder, text="Passwords are stored as salted PBKDF2-SHA256 hashes, never as plain text.",
+            holder, text="Passwords are kept secret and are never saved as plain text.",
             bg=COLORS["page"], fg=COLORS["faint"], font=sans(8),
         ).pack(pady=(12, 0))
 

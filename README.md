@@ -85,7 +85,7 @@ How passwords are kept safe: each password is mixed with a random 16-byte salt a
 Click **My Dashboard** in the side menu, or click your name at the bottom of it. It shows:
 
 - Your name, username, role, user ID, when you joined, and when you last signed in
-- How many products you added, updated or restocked, and deleted
+- How many products you added, updated or added stock to, and deleted
 - Your own saved activity, newest first
 - **Edit Profile** to change your full name, and **Change Password** (you must type your current password first)
 

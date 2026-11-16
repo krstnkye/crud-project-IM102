@@ -189,6 +189,13 @@ def add_activity(user_id, action, details):
 
 PRODUCT_ACTIONS = ("ADD", "RESTOCK", "UPDATE", "DELETE")
 
+# How saved actions are shown on screen. The short codes saved in activity_log do not change.
+ACTION_LABELS = {"RESTOCK": "ADD STOCK", "ALERT": "LOW STOCK", "START": "WELCOME", "THEME": "DISPLAY"}
+
+
+def action_label(action):
+    return ACTION_LABELS.get(action, action)
+
 
 def get_user_activity(user_id, limit=100):
     """One user's saved actions, newest first."""

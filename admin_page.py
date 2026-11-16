@@ -127,7 +127,7 @@ class AdminPage:
             self.activity.insert(
                 "", tk.END,
                 values=(nice_time(entry["created_at"]), f"@{entry['username']}" if entry["username"] else "(deleted user)",
-                        entry["action"], entry["details"]),
+                        database.action_label(entry["action"]), entry["details"]),
                 tags=("even" if index % 2 == 0 else "odd", ACTION_COLORS.get(entry["action"], "plain")),
             )
 

@@ -230,7 +230,7 @@ class ProfilePage:
         caps(card, "Change Password", color=COLORS["primary"], size=9).pack(anchor=tk.W)
         self.password_entries = {
             "current": self.field(card, "Current Password", self.password_vars["current"], secret=True),
-            "new": self.field(card, "New Password", self.password_vars["new"], secret=True, hint="8+ chars, a letter and a number"),
+            "new": self.field(card, "New Password", self.password_vars["new"], secret=True, hint="8 or more characters, a letter and a number"),
             "confirm": self.field(card, "Confirm New Password", self.password_vars["confirm"], secret=True),
         }
         self.password_note = self.message_label(card)
@@ -333,7 +333,7 @@ class ProfilePage:
         self.history.delete(*self.history.get_children())
         for index, entry in enumerate(history):
             self.history.insert(
-                "", tk.END, values=(nice_time(entry["created_at"]), entry["action"], entry["details"]),
+                "", tk.END, values=(nice_time(entry["created_at"]), database.action_label(entry["action"]), entry["details"]),
                 tags=("even" if index % 2 == 0 else "odd", ACTION_COLORS.get(entry["action"], "plain")),
             )
         self.history_count.configure(text=f"{len(history)} saved action{'s' if len(history) != 1 else ''}")

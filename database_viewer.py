@@ -57,7 +57,7 @@ TABLES = {
 def show_value(column, value):
     """How one saved value is shown in the table."""
     if value is None:
-        return "NULL"
+        return "(empty)"
     if column == "unit_price":
         return f"{value:.2f}"
     if column == "password_hash":
@@ -93,7 +93,7 @@ class DatabaseViewer:
         self.sql_var = tk.StringVar()
         self.table_title_var = tk.StringVar()
         self.status_var = tk.StringVar()
-        self.info_vars = {name: tk.StringVar(value="--") for name in ("SQLite version", "File size", "Product rows", "Database check")}
+        self.info_vars = {name: tk.StringVar(value="--") for name in ("Database version", "File size", "Product rows", "Database check")}
 
         self.build_screen()
         self.load_records()
@@ -333,12 +333,12 @@ class DatabaseViewer:
         count = len(self.records)
         self.table_title_var.set(f"Table: {self.table_name}  ({count} row{'s' if count != 1 else ''} returned)")
         self.status_var.set(
-            f"{total_rows[0]} product record(s)  ·  Read directly from {DB_PATH.name}  ·  "
-            f"Updates by itself after every change  ·  Loaded in {fetch_ms:.1f} ms"
+            f"{total_rows[0]} product record(s)  ·  Saved in {DB_PATH.name}  ·  "
+            f"Updates by itself after every change"
         )
 
         size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
-        self.info_vars["SQLite version"].set(sqlite3.sqlite_version)
+        self.info_vars["Database version"].set(sqlite3.sqlite_version)
         self.info_vars["File size"].set(f"{size / 1024:,.1f} KB")
         self.info_vars["Product rows"].set(f"{total_rows[0]} rows  ·  {total_rows[1]:,} units")
         self.info_vars["Database check"].set("OK" if integrity == "ok" else str(integrity))
@@ -346,7 +346,7 @@ class DatabaseViewer:
 
         ddl = " ".join(schema[0].split()).replace("( ", "(\n    ", 1).replace(", ", ",\n    ") if schema else f"No {self.table_name} table yet."
         self.set_text(self.schema_box, ddl.rstrip(")") + "\n);" if schema else ddl)
-        self.add_log(f"{shown_sql};", f"{count} row(s) in {fetch_ms:.1f} ms")
+        self.add_log(f"{shown_sql};", f"{count} row(s) found")
 
     def set_text(self, box, text):
         box.configure(state=tk.NORMAL)
