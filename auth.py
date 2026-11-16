@@ -33,6 +33,15 @@ class User:
     username: str
     full_name: str
     last_login: str | None = None
+    role: str = "staff"
+
+    @property
+    def is_admin(self):
+        return self.role == "admin"
+
+    @property
+    def role_name(self):
+        return "Admin" if self.is_admin else "Staff"
 
     @property
     def initials(self):
@@ -71,11 +80,13 @@ def sign_up(full_name, username, password, confirm_password):
     This does not sign the user in. They sign in afterwards with the username and password they chose.
     """
     full_name, username, password = validate_sign_up(full_name, username, password, confirm_password)
-    user_id = database.create_user(username, full_name, hash_password(password))
+    # The very first account becomes the admin. Everyone who signs up after that is staff.
+    role = "admin" if database.count_users() == 0 else "staff"
+    user_id = database.create_user(username, full_name, hash_password(password), role)
     if user_id is None:
         raise ValidationError("That username is already taken. Please choose another one.", "username")
-    database.add_activity(user_id, "SIGN UP", f"Account created for {full_name}.")
-    return User(user_id, username, full_name)
+    database.add_activity(user_id, "SIGN UP", f"{'Admin' if role == 'admin' else 'Staff'} account created for {full_name}.")
+    return User(user_id, username, full_name, role=role)
 
 
 def seconds_locked(username):
@@ -109,12 +120,14 @@ def sign_in(username, password):
         )
 
     _failed_attempts.pop(key, None)
+    if not row["is_active"]:
+        raise ValidationError("This account is turned off. Please ask an admin to turn it back on.", "username")
 
     # Upgrade old hashes to the current number of iterations.
     if row["password_hash"].split("$")[1] != str(ITERATIONS):
         database.set_password_hash(row["user_id"], hash_password(password))
 
-    user = User(row["user_id"], row["username"], row["full_name"], row["last_login"])
+    user = User(row["user_id"], row["username"], row["full_name"], row["last_login"], row["role"])
     database.record_login(user.user_id)
     database.add_activity(user.user_id, "SIGN IN", f"{user.full_name} signed in.")
     return user
@@ -127,7 +140,7 @@ def change_full_name(user, full_name):
         raise ValidationError("That is already your name.", "full_name")
     database.update_full_name(user.user_id, full_name)
     database.add_activity(user.user_id, "PROFILE", f"Changed name from {user.full_name} to {full_name}.")
-    return User(user.user_id, user.username, full_name, user.last_login)
+    return User(user.user_id, user.username, full_name, user.last_login, user.role)
 
 
 def change_password(user, current_password, new_password, confirm_password):
@@ -149,6 +162,58 @@ def change_password(user, current_password, new_password, confirm_password):
         raise ValidationError("The two new passwords do not match.", "confirm")
     database.set_password_hash(user.user_id, hash_password(new_password))
     database.add_activity(user.user_id, "PASSWORD", f"{user.full_name} changed their password.")
+
+
+# ---------------------------------------------------------------- admin tools
+
+
+def _require_admin(admin):
+    if admin is None or not admin.is_admin:
+        raise ValidationError("Only an admin can do this.")
+
+
+def _target(user_id):
+    row = database.get_user_by_id(user_id)
+    if row is None:
+        raise ValidationError("That account no longer exists.")
+    return row
+
+
+def admin_set_role(admin, user_id, role):
+    """Make a user an admin or staff. The last active admin cannot be made staff."""
+    _require_admin(admin)
+    if role not in ("admin", "staff"):
+        raise ValidationError("Unknown role.")
+    row = _target(user_id)
+    if row["role"] == role:
+        return
+    if role == "staff" and row["role"] == "admin" and database.count_active_admins() <= 1:
+        raise ValidationError("There must always be at least one admin.")
+    database.set_role(user_id, role)
+    database.add_activity(admin.user_id, "ROLE", f"Made @{row['username']} {'an Admin' if role == 'admin' else 'Staff'}.")
+
+
+def admin_set_active(admin, user_id, active):
+    """Turn an account on or off. Admins cannot turn off their own account."""
+    _require_admin(admin)
+    row = _target(user_id)
+    if not active and user_id == admin.user_id:
+        raise ValidationError("You cannot turn off your own account.")
+    if not active and row["role"] == "admin" and database.count_active_admins() <= 1:
+        raise ValidationError("There must always be at least one active admin.")
+    database.set_active(user_id, active)
+    database.add_activity(admin.user_id, "ACCOUNT", f"Turned {'on' if active else 'off'} the account of @{row['username']}.")
+
+
+def admin_reset_password(admin, user_id):
+    """Give a user a new temporary password and return it so the admin can pass it on."""
+    _require_admin(admin)
+    row = _target(user_id)
+    temporary = f"temp{secrets.randbelow(10 ** 6):06d}"
+    database.set_password_hash(user_id, hash_password(temporary))
+    _failed_attempts.pop(row["username"].lower(), None)
+    database.add_activity(admin.user_id, "PASSWORD", f"Reset the password of @{row['username']}.")
+    return temporary
 
 
 def sign_out(user):

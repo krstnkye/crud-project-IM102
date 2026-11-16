@@ -1,9 +1,15 @@
-"""The My Profile page: who the signed-in user is, what they changed, and the whole team's activity."""
+"""Profile pages, shown inside the main window.
+
+* My Dashboard: the signed-in user's own details, counts, and history, with forms to change
+  their name and password. This is the staff dashboard.
+* A staff or admin profile opened from the Admin Dashboard: the same details, plus account
+  controls for the admin (role, turn on/off, reset password).
+"""
 
 import sqlite3
 import tkinter as tk
 from datetime import datetime
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 import auth
 import database
@@ -38,36 +44,107 @@ def short_time(text, empty="Never"):
     return moment.strftime("%b %d %I:%M %p").replace(" 0", " ")
 
 
-# Only deletes and account changes are colored, so they stand out in the history.
-ACTION_COLORS = {"DELETE": "red", "PROFILE": "amber", "PASSWORD": "amber", "SIGN IN": "muted", "SIGN UP": "muted", "SIGN OUT": "muted"}
+def initials(full_name):
+    parts = full_name.split()
+    letters = (parts[0][0] + parts[-1][0]) if len(parts) > 1 else full_name[:2]
+    return letters.upper()
+
+
+# Only deletes and account changes are colored, so they stand out in a history list.
+ACTION_COLORS = {
+    "DELETE": "red", "PROFILE": "amber", "PASSWORD": "amber", "ROLE": "amber", "ACCOUNT": "amber",
+    "SIGN IN": "muted", "SIGN UP": "muted", "SIGN OUT": "muted",
+}
+
+
+# ---------------------------------------------------------------- shared building blocks
+
+
+def panel(parent, padx=16, pady=14):
+    outer = tk.Frame(parent, bg=COLORS["line"])
+    inner = tk.Frame(outer, bg=COLORS["card"], padx=padx, pady=pady)
+    inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+    return outer, inner
+
+
+def caps(parent, text, color=None, size=8, weight="bold"):
+    return tk.Label(parent, text=text, bg=COLORS["card"], fg=color or COLORS["muted"], font=sans(size, weight))
+
+
+def stat_tiles(parent, tiles, variables):
+    strip = tk.Frame(parent, bg=COLORS["page"])
+    strip.pack(fill=tk.X)
+    for index, (key, label, color) in enumerate(tiles):
+        strip.columnconfigure(index, weight=1, uniform="stats")
+        outer, card = panel(strip, padx=14, pady=10)
+        outer.grid(row=0, column=index, sticky="ew", padx=(0 if index == 0 else 10, 0))
+        caps(card, label).pack(anchor=tk.W)
+        tk.Label(card, textvariable=variables[key], bg=COLORS["card"], fg=COLORS[color], font=sans(17, "bold")).pack(anchor=tk.W)
+    return strip
+
+
+def table(parent, columns, height):
+    area = tk.Frame(parent, bg=COLORS["card"])
+    area.pack(fill=tk.BOTH, expand=True)
+    area.rowconfigure(0, weight=1)
+    area.columnconfigure(0, weight=1)
+    tree = ttk.Treeview(area, columns=[c[0] for c in columns], show="headings", selectmode="browse", height=height)
+    for key, heading, width, anchor in columns:
+        tree.heading(key, text=heading, anchor=anchor)
+        tree.column(key, width=width, minwidth=50, anchor=anchor, stretch=True)
+    scrollbar = ttk.Scrollbar(area, orient=tk.VERTICAL, command=tree.yview)
+    tree.configure(yscrollcommand=scrollbar.set)
+    tree.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    tree.tag_configure("even", background=COLORS["card"])
+    tree.tag_configure("odd", background=COLORS["row_alt"])
+    for name in set(ACTION_COLORS.values()):
+        tree.tag_configure(name, foreground=COLORS[name])
+    tree.tag_configure("plain", foreground=COLORS["text"])
+    tree.tag_configure("me", foreground=COLORS["primary"])
+    tree.tag_configure("off", foreground=COLORS["faint"])
+    return tree
+
+
+def card_header(card, title, note=None):
+    top = tk.Frame(card, bg=COLORS["card"], padx=16, pady=9)
+    top.pack(fill=tk.X)
+    tk.Label(top, text=title, bg=COLORS["card"], fg=COLORS["strong"], font=sans(12, "bold")).pack(side=tk.LEFT)
+    if note:
+        caps(top, note, weight="normal").pack(side=tk.RIGHT)
+    return top
+
+
+def role_badge(parent, role, active=True, bg=None):
+    if not active:
+        text, fg, soft = "Turned off", COLORS["faint"], COLORS["card_high"]
+    elif role == "admin":
+        text, fg, soft = "Admin", COLORS["secondary"], COLORS["secondary_soft"]
+    else:
+        text, fg, soft = "Staff", COLORS["primary"], COLORS["primary_soft"]
+    return tk.Label(parent, text=text, bg=soft, fg=fg, font=sans(8, "bold"), padx=6, pady=1)
+
+
+# ---------------------------------------------------------------- the page
 
 
 class ProfilePage:
-    def __init__(self, parent, app):
+    def __init__(self, parent, app, user_id=None):
         self.app = app
+        self.user_id = user_id or app.user.user_id
+        self.is_self = self.user_id == app.user.user_id
         self.frame = tk.Frame(parent, bg=COLORS["page"], padx=20, pady=14)
         self.name_var = tk.StringVar(value=app.user.full_name)
         self.password_vars = {name: tk.StringVar() for name in ("current", "new", "confirm")}
         self.name_message = tk.StringVar()
         self.password_message = tk.StringVar()
+        self.admin_message = tk.StringVar()
         self.stat_vars = {name: tk.StringVar(value="0") for name in ("total", "ADD", "UPDATE", "DELETE")}
+        self.row = None
         self.build()
         self.load()
 
-    @property
-    def user(self):
-        return self.app.user
-
     # ------------------------------------------------------------------ layout
-
-    def panel(self, parent, padx=16, pady=14):
-        outer = tk.Frame(parent, bg=COLORS["line"])
-        inner = tk.Frame(outer, bg=COLORS["card"], padx=padx, pady=pady)
-        inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
-        return outer, inner
-
-    def caps(self, parent, text, color=None, size=8, weight="bold"):
-        return tk.Label(parent, text=text, bg=COLORS["card"], fg=color or COLORS["muted"], font=sans(size, weight))
 
     def build(self):
         self.frame.columnconfigure(1, weight=1)
@@ -80,14 +157,37 @@ class ProfilePage:
         right.grid(row=0, column=1, sticky="nsew")
 
         self.build_identity(left)
-        self.build_settings(left)
-        self.build_stats(right)
-        self.build_team(right)
-        self.build_history(right)
+        if self.is_self:
+            self.build_settings(left)
+        else:
+            self.build_admin_controls(left)
+
+        mine = "My " if self.is_self else ""
+        stat_tiles(right, (
+            ("total", f"{mine}Product Changes", "strong"),
+            ("ADD", "Products Added", "green"),
+            ("UPDATE", "Updates and Restocks", "primary"),
+            ("DELETE", "Products Deleted", "red"),
+        ), self.stat_vars)
+
+        outer, card = panel(right, padx=0, pady=0)
+        outer.pack(fill=tk.BOTH, expand=True, pady=(14, 0))
+        top = card_header(card, f"{mine}Activity", "Saved in activity_log, newest first")
+        self.history_count = tk.Label(top, bg=COLORS["primary_soft"], fg=COLORS["primary"], font=sans(8, "bold"), padx=6, pady=1)
+        self.history_count.pack(side=tk.LEFT, padx=(10, 0))
+        self.history = table(card, (
+            ("time", "When", 165, tk.W),
+            ("action", "Action", 95, tk.W),
+            ("details", "Details", 470, tk.W),
+        ), height=8)
 
     def build_identity(self, parent):
-        outer, card = self.panel(parent)
+        outer, card = panel(parent)
         outer.pack(fill=tk.X)
+        if not self.is_self:
+            back = tk.Label(card, text="‹  Back to Admin Dashboard", bg=COLORS["card"], fg=COLORS["primary"], font=sans(8, "bold"), cursor="hand2")
+            back.pack(anchor=tk.W, pady=(0, 8))
+            back.bind("<Button-1>", lambda event: self.app.show_page("admin"))
         row = tk.Frame(card, bg=COLORS["card"])
         row.pack(fill=tk.X)
         self.avatar = tk.Canvas(row, width=58, height=58, bg=COLORS["card"], highlightthickness=0)
@@ -96,12 +196,17 @@ class ProfilePage:
         names.pack(side=tk.LEFT, padx=(12, 0), fill=tk.X, expand=True)
         self.full_name_label = tk.Label(names, bg=COLORS["card"], fg=COLORS["strong"], font=sans(14, "bold"), anchor=tk.W)
         self.full_name_label.pack(fill=tk.X)
-        tk.Label(names, text=f"@{self.user.username}", bg=COLORS["card"], fg=COLORS["primary"], font=sans(9, "bold"), anchor=tk.W).pack(fill=tk.X)
+        line = tk.Frame(names, bg=COLORS["card"])
+        line.pack(fill=tk.X)
+        self.username_label = tk.Label(line, bg=COLORS["card"], fg=COLORS["muted"], font=sans(9, "bold"))
+        self.username_label.pack(side=tk.LEFT)
+        self.badge_holder = tk.Frame(line, bg=COLORS["card"])
+        self.badge_holder.pack(side=tk.LEFT, padx=(8, 0))
 
         facts = tk.Frame(card, bg=COLORS["card"])
         facts.pack(fill=tk.X, pady=(12, 0))
         self.fact_labels = {}
-        for name in ("User ID", "Member since", "Previous sign-in", "Last product change"):
+        for name in ("User ID", "Member since", "Previous sign-in" if self.is_self else "Last sign-in", "Last product change"):
             line = tk.Frame(facts, bg=COLORS["card"])
             line.pack(fill=tk.X, pady=1)
             tk.Label(line, text=name, bg=COLORS["card"], fg=COLORS["muted"], font=sans(8)).pack(side=tk.LEFT)
@@ -110,29 +215,51 @@ class ProfilePage:
             self.fact_labels[name] = value
 
     def build_settings(self, parent):
-        outer, card = self.panel(parent)
+        outer, card = panel(parent)
         outer.pack(fill=tk.BOTH, expand=True, pady=(14, 0))
 
-        self.caps(card, "Edit Profile", color=COLORS["primary"], size=9).pack(anchor=tk.W)
+        caps(card, "Edit Profile", color=COLORS["primary"], size=9).pack(anchor=tk.W)
         self.name_entry = self.field(card, "Full Name", self.name_var)
-        self.name_note = self.message_label(card, self.name_message)
+        self.name_note = self.message_label(card)
         FlatButton(
             card, "Save Name", self.save_name, COLORS["card_high"], COLORS["strong"], COLORS["card_top"],
             font_size=8, pady=6, border=COLORS["line_high"],
         ).pack(fill=tk.X, pady=(8, 0))
 
         tk.Frame(card, bg=COLORS["line"], height=1).pack(fill=tk.X, pady=12)
-        self.caps(card, "Change Password", color=COLORS["primary"], size=9).pack(anchor=tk.W)
+        caps(card, "Change Password", color=COLORS["primary"], size=9).pack(anchor=tk.W)
         self.password_entries = {
             "current": self.field(card, "Current Password", self.password_vars["current"], secret=True),
             "new": self.field(card, "New Password", self.password_vars["new"], secret=True, hint="8+ chars, a letter and a number"),
             "confirm": self.field(card, "Confirm New Password", self.password_vars["confirm"], secret=True),
         }
-        self.password_note = self.message_label(card, self.password_message)
+        self.password_note = self.message_label(card)
         FlatButton(
             card, "Change Password", self.save_password, COLORS["button"], COLORS["button_text"], COLORS["primary_hover"],
             font_size=8, pady=7, border=COLORS["button"],
         ).pack(fill=tk.X, pady=(8, 0))
+
+    def build_admin_controls(self, parent):
+        outer, card = panel(parent)
+        outer.pack(fill=tk.BOTH, expand=True, pady=(14, 0))
+        caps(card, "Manage Account", color=COLORS["primary"], size=9).pack(anchor=tk.W)
+        tk.Label(
+            card, text="Only admins can see this panel. Every change here is saved in the activity log.",
+            bg=COLORS["card"], fg=COLORS["muted"], font=sans(8), wraplength=290, justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(2, 10))
+        self.role_button = FlatButton(card, "", self.toggle_role, COLORS["card_high"], COLORS["strong"], COLORS["card_top"],
+                                      font_size=8, pady=7, border=COLORS["line_high"])
+        self.role_button.pack(fill=tk.X)
+        self.active_button = FlatButton(card, "", self.toggle_active, COLORS["red_soft"], COLORS["red"], COLORS["red_hover"],
+                                        font_size=8, pady=7, border=COLORS["red_line"])
+        self.active_button.pack(fill=tk.X, pady=(8, 0))
+        FlatButton(card, "Reset Password", self.reset_password, COLORS["card_high"], COLORS["strong"], COLORS["card_top"],
+                   font_size=8, pady=7, border=COLORS["line_high"]).pack(fill=tk.X, pady=(8, 0))
+        self.admin_note = self.message_label(card)
+        tk.Label(
+            card, text="Reset Password gives this person a temporary password. Tell it to them in person; they can change it in My Dashboard.",
+            bg=COLORS["card"], fg=COLORS["faint"], font=sans(8), wraplength=290, justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(10, 0))
 
     def field(self, parent, label, variable, secret=False, hint=None):
         top = tk.Frame(parent, bg=COLORS["card"])
@@ -151,115 +278,51 @@ class ProfilePage:
         entry.bind("<FocusOut>", lambda e: box.configure(highlightbackground=COLORS["line_high"]), add="+")
         return entry
 
-    def message_label(self, parent, variable):
+    def message_label(self, parent):
         anchor = tk.Frame(parent, bg=COLORS["card"])
         anchor.pack(fill=tk.X)
-        label = tk.Label(anchor, textvariable=variable, font=sans(8, "bold"), wraplength=280, justify=tk.LEFT, anchor=tk.W, padx=8, pady=4)
-        label.anchor_frame = anchor
-        return label
+        return tk.Label(anchor, font=sans(8, "bold"), wraplength=280, justify=tk.LEFT, anchor=tk.W, padx=8, pady=4)
 
-    def set_message(self, label, variable, text, kind):
-        variable.set(text)
+    def set_message(self, label, text, kind="error"):
         if not text:
             label.pack_forget()
             return
-        if kind == "success":
-            label.configure(bg=COLORS["green_soft"], fg=COLORS["green"])
-        else:
-            label.configure(bg=COLORS["red_soft"], fg=COLORS["red"])
-        label.pack(fill=tk.X, pady=(6, 0))
-
-    def build_stats(self, parent):
-        strip = tk.Frame(parent, bg=COLORS["page"])
-        strip.pack(fill=tk.X)
-        tiles = (
-            ("total", "My Product Changes", "strong"),
-            ("ADD", "Products Added", "green"),
-            ("UPDATE", "Updates and Restocks", "primary"),
-            ("DELETE", "Products Deleted", "red"),
-        )
-        for index, (key, label, color) in enumerate(tiles):
-            strip.columnconfigure(index, weight=1, uniform="stats")
-            outer, card = self.panel(strip, padx=14, pady=10)
-            outer.grid(row=0, column=index, sticky="ew", padx=(0 if index == 0 else 10, 0))
-            self.caps(card, label).pack(anchor=tk.W)
-            tk.Label(card, textvariable=self.stat_vars[key], bg=COLORS["card"], fg=COLORS[color], font=sans(17, "bold")).pack(anchor=tk.W)
-
-    def table(self, parent, columns, height):
-        area = tk.Frame(parent, bg=COLORS["card"])
-        area.pack(fill=tk.BOTH, expand=True)
-        area.rowconfigure(0, weight=1)
-        area.columnconfigure(0, weight=1)
-        tree = ttk.Treeview(area, columns=[c[0] for c in columns], show="headings", selectmode="browse", height=height)
-        for key, heading, width, anchor in columns:
-            tree.heading(key, text=heading, anchor=anchor)
-            tree.column(key, width=width, minwidth=50, anchor=anchor, stretch=True)
-        scrollbar = ttk.Scrollbar(area, orient=tk.VERTICAL, command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        tree.grid(row=0, column=0, sticky="nsew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        tree.tag_configure("even", background=COLORS["card"])
-        tree.tag_configure("odd", background=COLORS["row_alt"])
-        for name in set(ACTION_COLORS.values()):
-            tree.tag_configure(name, foreground=COLORS[name])
-        tree.tag_configure("plain", foreground=COLORS["text"])
-        tree.tag_configure("me", foreground=COLORS["primary"])
-        return tree
-
-    def build_history(self, parent):
-        outer, card = self.panel(parent, padx=0, pady=0)
-        outer.pack(fill=tk.BOTH, expand=True, pady=(14, 0))
-        top = tk.Frame(card, bg=COLORS["card"], padx=16, pady=9)
-        top.pack(fill=tk.X)
-        tk.Label(top, text="My Activity", bg=COLORS["card"], fg=COLORS["strong"], font=sans(12, "bold")).pack(side=tk.LEFT)
-        self.history_count = tk.Label(top, bg=COLORS["primary_soft"], fg=COLORS["primary"], font=sans(8, "bold"), padx=6, pady=1)
-        self.history_count.pack(side=tk.LEFT, padx=(10, 0))
-        self.caps(top, "Everything you did, saved in activity_log", weight="normal").pack(side=tk.RIGHT)
-        self.history = self.table(card, (
-            ("time", "When", 165, tk.W),
-            ("action", "Action", 95, tk.W),
-            ("details", "Details", 470, tk.W),
-        ), height=5)
-
-    def build_team(self, parent):
-        outer, card = self.panel(parent, padx=0, pady=0)
-        outer.pack(side=tk.BOTTOM, fill=tk.X, pady=(14, 0))
-        top = tk.Frame(card, bg=COLORS["card"], padx=16, pady=9)
-        top.pack(fill=tk.X)
-        tk.Label(top, text="Team", bg=COLORS["card"], fg=COLORS["strong"], font=sans(12, "bold")).pack(side=tk.LEFT)
-        self.caps(top, "Who made how many product changes", weight="normal").pack(side=tk.RIGHT)
-        self.team = self.table(card, (
-            ("user", "User", 120, tk.W),
-            ("name", "Full Name", 160, tk.W),
-            ("changes", "Product Changes", 120, tk.E),
-            ("last_change", "Last Change", 165, tk.W),
-            ("last_login", "Last Sign-in", 165, tk.W),
-        ), height=3)
+        icon = "✓" if kind == "success" else "⚠"
+        soft, fg = ("green_soft", "green") if kind == "success" else ("red_soft", "red")
+        label.configure(text=f"{icon}  {text}", bg=COLORS[soft], fg=COLORS[fg])
+        label.pack(fill=tk.X, pady=(8, 0))
 
     # ---------------------------------------------------------------- data
 
-    def draw_avatar(self):
-        canvas = self.avatar
-        canvas.delete("all")
-        canvas.create_oval(2, 2, 56, 56, fill=COLORS["primary_soft"], outline=COLORS["primary_line"], width=2)
-        canvas.create_text(29, 29, text=self.user.initials, fill=COLORS["primary"], font=sans(16, "bold"))
-
     def load(self):
-        user = self.user
-        self.draw_avatar()
-        self.full_name_label.configure(text=user.full_name if len(user.full_name) <= 24 else user.full_name[:23] + "…")
         try:
-            row = database.get_user_by_id(user.user_id)
-            stats = database.get_user_stats(user.user_id)
-            history = database.get_user_activity(user.user_id, 200)
-            team = database.get_team_summary()
+            self.row = database.get_user_by_id(self.user_id)
+            stats = database.get_user_stats(self.user_id)
+            history = database.get_user_activity(self.user_id, 300)
         except sqlite3.DatabaseError:
             self.app.database_problem("load the profile")
             return
+        if self.row is None:
+            self.app.show_page("admin")
+            return
+        row = self.row
+        full_name = row["full_name"]
 
-        self.fact_labels["User ID"].configure(text=f"U{user.user_id:03d}")
-        self.fact_labels["Member since"].configure(text=nice_time(row["created_at"] if row else None, "--"))
-        self.fact_labels["Previous sign-in"].configure(text=nice_time(user.last_login, "First time"))
+        self.avatar.delete("all")
+        self.avatar.create_oval(2, 2, 56, 56, fill=COLORS["primary_soft"], outline=COLORS["primary_line"], width=2)
+        self.avatar.create_text(29, 29, text=initials(full_name), fill=COLORS["primary"], font=sans(16, "bold"))
+        self.full_name_label.configure(text=full_name if len(full_name) <= 24 else full_name[:23] + "…")
+        self.username_label.configure(text=f"@{row['username']}")
+        for widget in self.badge_holder.winfo_children():
+            widget.destroy()
+        role_badge(self.badge_holder, row["role"], bool(row["is_active"])).pack(side=tk.LEFT)
+
+        self.fact_labels["User ID"].configure(text=f"U{row['user_id']:03d}")
+        self.fact_labels["Member since"].configure(text=nice_time(row["created_at"], "--"))
+        if self.is_self:
+            self.fact_labels["Previous sign-in"].configure(text=nice_time(self.app.user.last_login, "First time"))
+        else:
+            self.fact_labels["Last sign-in"].configure(text=nice_time(row["last_login"]))
         self.fact_labels["Last product change"].configure(text=nice_time(stats["last_change"], "None yet"))
 
         self.stat_vars["total"].set(f"{stats['total']:,}")
@@ -275,46 +338,33 @@ class ProfilePage:
             )
         self.history_count.configure(text=f"{len(history)} saved action{'s' if len(history) != 1 else ''}")
 
-        self.team.delete(*self.team.get_children())
-        for index, member in enumerate(team):
-            tags = ["even" if index % 2 == 0 else "odd"]
-            if member["user_id"] == user.user_id:
-                tags.append("me")
-            self.team.insert(
-                "", tk.END,
-                values=(
-                    f"@{member['username']}" + ("  (you)" if member["user_id"] == user.user_id else ""),
-                    member["full_name"], f"{member['changes']:,}",
-                    short_time(member["last_change"], "None yet"), short_time(member["last_login"]),
-                ),
-                tags=tuple(tags),
-            )
+        if not self.is_self:
+            is_admin = row["role"] == "admin"
+            self.role_button.configure(text="Change to Staff" if is_admin else "Make Admin")
+            self.active_button.configure(text="Turn Off Account" if row["is_active"] else "Turn On Account")
 
-    # ---------------------------------------------------------------- actions
+    # ---------------------------------------------------------------- my own profile
 
     def save_name(self):
-        self.set_message(self.name_note, self.name_message, "", "error")
+        self.set_message(self.name_note, "")
         try:
-            self.app.user = auth.change_full_name(self.user, self.name_var.get())
+            self.app.user = auth.change_full_name(self.app.user, self.name_var.get())
         except ValidationError as error:
-            self.set_message(self.name_note, self.name_message, f"⚠  {error.message}", "error")
+            self.set_message(self.name_note, error.message)
             self.name_entry.focus_set()
             return
         except sqlite3.DatabaseError:
             self.app.database_problem("save your name")
             return
-        self.name_var.set(self.user.full_name)
-        self.set_message(self.name_note, self.name_message, "✓  Your name was saved.", "success")
         self.app.on_profile_changed()
-        self.load()
 
     def save_password(self):
-        self.set_message(self.password_note, self.password_message, "", "error")
+        self.set_message(self.password_note, "")
         values = {name: var.get() for name, var in self.password_vars.items()}
         try:
-            auth.change_password(self.user, values["current"], values["new"], values["confirm"])
+            auth.change_password(self.app.user, values["current"], values["new"], values["confirm"])
         except ValidationError as error:
-            self.set_message(self.password_note, self.password_message, f"⚠  {error.message}", "error")
+            self.set_message(self.password_note, error.message)
             entry = self.password_entries.get(error.field)
             if entry is not None:
                 entry.focus_set()
@@ -325,6 +375,52 @@ class ProfilePage:
             return
         for var in self.password_vars.values():
             var.set("")
-        self.set_message(self.password_note, self.password_message, "✓  Password changed. Use the new one next time you sign in.", "success")
+        self.set_message(self.password_note, "Password changed. Use the new one next time you sign in.", "success")
         self.app.log("PASSWORD", "Password changed.")
         self.load()
+
+    # ---------------------------------------------------------------- admin controls
+
+    def run_admin_action(self, action, success):
+        self.set_message(self.admin_note, "")
+        try:
+            result = action()
+        except ValidationError as error:
+            self.set_message(self.admin_note, error.message)
+            return None
+        except sqlite3.DatabaseError:
+            self.app.database_problem("change this account")
+            return None
+        self.load()
+        self.set_message(self.admin_note, success if isinstance(success, str) else success(result), "success")
+        return result
+
+    def toggle_role(self):
+        new_role = "staff" if self.row["role"] == "admin" else "admin"
+        name = self.row["full_name"]
+        if not messagebox.askyesno("Change Role", f"Make {name} {'an Admin' if new_role == 'admin' else 'Staff'}?", parent=self.app.root):
+            return
+        self.run_admin_action(
+            lambda: auth.admin_set_role(self.app.user, self.user_id, new_role),
+            f"{name} is now {'an Admin' if new_role == 'admin' else 'Staff'}.",
+        )
+
+    def toggle_active(self):
+        turn_on = not self.row["is_active"]
+        name = self.row["full_name"]
+        question = f"Turn on the account of {name}?" if turn_on else f"Turn off the account of {name}?\n\nThey will not be able to sign in until it is turned on again."
+        if not messagebox.askyesno("Account", question, parent=self.app.root):
+            return
+        self.run_admin_action(
+            lambda: auth.admin_set_active(self.app.user, self.user_id, turn_on),
+            f"The account was turned {'on' if turn_on else 'off'}.",
+        )
+
+    def reset_password(self):
+        name = self.row["full_name"]
+        if not messagebox.askyesno("Reset Password", f"Give {name} a new temporary password?\n\nTheir old password will stop working.", parent=self.app.root):
+            return
+        self.run_admin_action(
+            lambda: auth.admin_reset_password(self.app.user, self.user_id),
+            lambda temporary: f"Temporary password: {temporary}  (tell it to {name.split()[0]} in person)",
+        )

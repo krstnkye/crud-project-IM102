@@ -6,6 +6,13 @@ The app helps you keep a list of products. You can add a product, see the saved 
 
 Each person signs in with their own account first. Passwords are never saved as plain text, and every add, update, and delete is saved with the name of the user who did it.
 
+There are two kinds of accounts:
+
+- **Admin:** the first account made on a computer. An admin can do everything, including deleting products, opening Database Records, and using the **Admin Dashboard** to see the whole team and manage accounts.
+- **Staff:** every account made after the first one. Staff can add and update products and use **My Dashboard**, but cannot delete products or open Database Records.
+
+Every page (Inventory, My Dashboard, Admin Dashboard, and a team member's profile) opens inside the same main window. Nothing opens in a new window except the Database Records viewer.
+
 The five summary cards at the top of the app show:
 
 - Total Inventory Value (quantity × unit price of all products)
@@ -24,7 +31,9 @@ The five summary cards at the top of the app show:
 
 ```text
 crud-project-IM102/
-|-- main.py              (main window and product CRUD)
+|-- main.py              (main window, page switching, and product CRUD)
+|-- profile_page.py      (My Dashboard and team member profiles)
+|-- admin_page.py        (Admin Dashboard)
 |-- auth_screen.py       (Sign In and Create Account screen)
 |-- auth.py              (password hashing, sign up, sign in)
 |-- validation.py        (input checks shared by every form)
@@ -50,11 +59,11 @@ crud-project-IM102/
 
 | Table | What it keeps |
 | --- | --- |
-| `products` | product_id, product_name, category, quantity, unit_price |
-| `users` | user_id, username (unique), full_name, password_hash, created_at, last_login |
+| `products` | product_id, product_name, category, quantity, unit_price, created_by and updated_by (link to `users`), created_at, updated_at |
+| `users` | user_id, username (unique), full_name, password_hash, created_at, last_login, role (admin or staff), is_active |
 | `activity_log` | log_id, user_id (links to `users`), action, details, created_at |
 
-An older `inventory.db` from before accounts were added still works. The new tables are added the next time the app starts, and the saved products are kept.
+An older `inventory.db` from before accounts were added still works. The new tables and columns are added the next time the app starts, and the saved products are kept. If an older database has accounts but no admin yet, the oldest account becomes the admin.
 
 ## Sign In and Sign Up
 
@@ -65,9 +74,47 @@ The first time the app runs there are no accounts yet, so it opens on **Create A
 - **Password:** at least 8 characters with at least one letter and one number, cannot be the same as the username, and must be typed twice the same way.
 - **Show password** shows what you typed, and a warning appears when Caps Lock is on.
 - After 5 wrong passwords in a row, sign in for that username is paused for 30 seconds.
+- After **Create Account**, the app does not sign you in. It goes back to the Sign In screen with your new username filled in, and you sign in with the username and password you just made.
+- An account that an admin turned off cannot sign in until an admin turns it back on.
 - **Sign Out** is at the bottom of the side menu. It goes back to the Sign In screen.
 
 How passwords are kept safe: each password is mixed with a random 16-byte salt and run through PBKDF2-HMAC-SHA256 240,000 times (Python's built-in `hashlib`). Only the result is saved in `users.password_hash`. When you sign in, the same steps are done again and the two results are compared with `hmac.compare_digest`. Nobody, including the teacher opening the database, can read the original password.
+
+## My Dashboard (every user)
+
+Click **My Dashboard** in the side menu, or click your name at the bottom of it. It shows:
+
+- Your name, username, role, user ID, when you joined, and when you last signed in
+- How many products you added, updated or restocked, and deleted
+- Your own saved activity, newest first
+- **Edit Profile** to change your full name, and **Change Password** (you must type your current password first)
+
+## Admin Dashboard (admins only)
+
+Click **Admin Dashboard** in the side menu. It shows:
+
+- Team Members, Active Accounts, and product changes today and in the last 7 days
+- The **Team** list with each person's role, status, number of product changes, last change, and last sign-in
+- **All Activity**, which shows who did what, newest first. Click **Product changes only** to hide sign-ins and sign-outs.
+
+Double-click a person in the Team list (or click **Open Profile**) to open their profile in the same window. There an admin can:
+
+- **Make Admin** or **Make Staff** (the last admin cannot be made staff)
+- **Turn Off Account** or **Turn On Account** (you cannot turn off your own account)
+- **Reset Password**, which shows a temporary password like `temp123456` to tell the person. They can change it in My Dashboard.
+
+Every one of these actions is saved in the activity log with the admin's name. **‹ Back to Admin Dashboard** goes back to the team list.
+
+## Who Can Do What
+
+| Action | Admin | Staff |
+| --- | --- | --- |
+| Add and update products | Yes | Yes |
+| Delete products | Yes | No |
+| My Dashboard, change own name and password | Yes | Yes |
+| Admin Dashboard, see everyone's activity | Yes | No |
+| Change roles, turn accounts on or off, reset passwords | Yes | No |
+| Database Records window | Yes | No |
 
 ## How To Run
 
@@ -91,11 +138,13 @@ py main.py
 | --- | --- |
 | Add Product | Saves a new product. |
 | Update | Changes the selected product. |
-| Delete | Removes the selected product after asking first. |
+| Delete | Removes the selected product after asking first (admins only). |
 | Clear Fields | Empties the form so you can type again. |
 | New Product | Clears the form and puts the cursor in Product Name. |
-| Database Records | Opens a window that shows the raw rows of the `products`, `users`, and `activity_log` tables, the database details, and quick queries. It updates by itself after every change. |
+| Database Records | (Admins only) Opens a window that shows the raw rows of the `products`, `users`, and `activity_log` tables, the database details, and quick queries. It updates by itself after every change. |
 | Export CSV | In the Database Records window, saves the rows shown to a CSV file you can open in Excel. Password hashes are never exported. |
+| My Dashboard | Shows your profile, your activity, and lets you change your name and password. |
+| Admin Dashboard | (Admins only) Shows the team, everyone's activity, and account tools. |
 | Sign Out | Signs out and goes back to the Sign In screen. |
 | Light Mode / Dark Mode | Switches the app between the dark and light theme. |
 
@@ -108,7 +157,7 @@ Update and Delete only turn on after you click a product in the list.
 - **Search:** type in the search box to filter products by ID, name, or category.
 - **Sorting:** click a column heading to sort. Click it again to reverse the order.
 - **Stock status:** products with less than 10 pieces are shown in amber, and products with 0 pieces in red.
-- **Product details:** shows the selected product's stock, price, total value, status, and a stock bar compared with the low stock line.
+- **Product details:** shows the selected product's stock, price, total value, status, a stock bar compared with the low stock line, and who changed it last.
 - **Fonts:** the app uses Segoe UI, the normal Windows font. On Mac or Linux it uses a similar font that is already installed.
 - **Activity log:** lists what was added, updated, or deleted and by whom. It is saved in the `activity_log` table, so the history is still there after the app is closed.
 - **Keyboard shortcuts:** `Enter` saves the form, `Esc` clears it, `Delete` removes the selected product (click the table first), `Ctrl+F` jumps to the search box, and `Ctrl+L` switches the theme.
@@ -145,6 +194,7 @@ A red message appears inside the form when:
 - Adding to a saved product would put its stock over 1,000,000 pieces
 - An update would make the same product (same name, category, and price) as another one
 - No product is selected before updating or deleting
+- A staff account tries to delete a product (only an admin can)
 
 The Sign In and Create Account screen shows the same kind of red message when:
 
@@ -157,7 +207,7 @@ Deleting a product and signing out ask for confirmation in a pop-up first. If th
 
 ## Automatic Tests
 
-`test_database.py` has 23 tests. They check adding, adding to an existing product, updating, deleting, the totals, the product and sign up input checks, password hashing, sign up, sign in, duplicate usernames, the wrong-password pause, and the saved activity log. It uses a temporary database, so your saved products are not touched. Run it from the project folder:
+`test_database.py` has 30 tests. They check adding, adding to an existing product, updating, deleting, the totals, the product and sign up input checks, password hashing, sign up (without signing in), sign in, duplicate usernames, the wrong-password pause, the saved activity log, who changed each product, profile numbers, changing your name and password, the Admin and Staff roles, the admin tools (roles, turning accounts off, password reset), and opening older databases. It uses a temporary database, so your saved products are not touched. Run it from the project folder:
 
 ```bash
 python -m unittest test_database.py
@@ -167,7 +217,7 @@ It should end with `OK`.
 
 ## Suggested Manual Testing
 
-1. Create an account, sign out, and sign in again.
+1. Create the first account (it becomes the admin). Check that the app goes back to Sign In, then sign in with it.
 2. Try signing in with a wrong password.
 3. Add a product.
 4. Check if it appears in the product list.
@@ -176,4 +226,7 @@ It should end with `OK`.
 7. Try a negative quantity.
 8. Select a product and update it.
 9. Delete a product.
-10. Close and open the app again to check if saved products and the activity log are still there.
+10. Open My Dashboard and check that your changes are listed.
+11. Sign out and create a second account (it becomes staff). Sign in and check that Delete, Database Records, and Admin Dashboard are not available.
+12. Sign in as the admin, open Admin Dashboard, open the staff profile, and try Reset Password and Turn Off Account.
+13. Close and open the app again to check if saved products and the activity log are still there.

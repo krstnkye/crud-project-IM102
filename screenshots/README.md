@@ -21,4 +21,11 @@ Pictures of the app used in the project documentation:
 - `19_db_users.png` - the users table (only password hashes are saved)
 - `20_db_activity_log.png` - the activity_log table (who did what)
 - `21_sign_in_light.png` - the Sign In screen in light mode
-- `erd.png` - the entity-relationship diagram (ERD) of the database
+- `22_sign_up_done.png` - back on Sign In after creating an account
+- `23_profile.png` - My Dashboard (the admin's own profile)
+- `24_profile_password_error.png` - error when the current password is wrong
+- `25_admin_dashboard.png` - the Admin Dashboard (team list and all activity)
+- `26_staff_profile_admin_view.png` - a staff profile opened by the admin, after Reset Password
+- `27_staff_inventory.png` - the inventory as staff (no Delete, no Database Records)
+- `28_staff_dashboard.png` - My Dashboard for a staff account
+- `erd.png` - the entity-relationship diagram (ERD) of the database, including roles

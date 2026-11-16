@@ -241,6 +241,63 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(database.count_users(), 0)
 
 
+    def test_first_account_is_admin_and_others_are_staff(self):
+        first = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
+        second = auth.sign_up("Maria Santos", "maria", "inventory2", "inventory2")
+        self.assertTrue(first.is_admin)
+        self.assertFalse(second.is_admin)
+        self.assertEqual(auth.sign_in("maria", "inventory2").role, "staff")
+        self.assertEqual(auth.sign_in("juan", "inventory1").role, "admin")
+
+    def test_admin_tools(self):
+        admin = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
+        staff = auth.sign_up("Maria Santos", "maria", "inventory2", "inventory2")
+
+        with self.assertRaises(ValidationError):
+            auth.admin_set_active(staff, admin.user_id, False)  # staff cannot use admin tools
+        with self.assertRaises(ValidationError):
+            auth.admin_set_role(admin, admin.user_id, "staff")  # the last admin must stay
+        with self.assertRaises(ValidationError):
+            auth.admin_set_active(admin, admin.user_id, False)  # cannot turn off yourself
+
+        auth.admin_set_active(admin, staff.user_id, False)
+        with self.assertRaises(ValidationError) as caught:
+            auth.sign_in("maria", "inventory2")
+        self.assertIn("turned off", caught.exception.message)
+        auth.admin_set_active(admin, staff.user_id, True)
+
+        temporary = auth.admin_reset_password(admin, staff.user_id)
+        with self.assertRaises(ValidationError):
+            auth.sign_in("maria", "inventory2")
+        self.assertEqual(auth.sign_in("maria", temporary).username, "maria")
+
+        auth.admin_set_role(admin, staff.user_id, "admin")
+        self.assertEqual(database.get_user_by_id(staff.user_id)["role"], "admin")
+        auth.admin_set_role(admin, admin.user_id, "staff")  # allowed now that there is another admin
+        actions = [row["action"] for row in database.get_all_activity(50)]
+        self.assertIn("ROLE", actions)
+        self.assertIn("ACCOUNT", actions)
+
+    def test_old_users_table_gets_roles(self):
+        old_path = Path(self.folder.name) / "old_users.db"
+        connection = sqlite3.connect(old_path)
+        connection.execute(
+            "CREATE TABLE users (user_id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE, "
+            "full_name TEXT NOT NULL, password_hash TEXT NOT NULL, created_at TEXT NOT NULL, last_login TEXT)"
+        )
+        for name in ("first", "second"):
+            connection.execute(
+                "INSERT INTO users (username, full_name, password_hash, created_at) VALUES (?, ?, ?, '2026-11-16 08:00:00')",
+                (name, name.title(), auth.hash_password("inventory1")),
+            )
+        connection.commit()
+        connection.close()
+        database.DB_PATH = old_path
+        database.initialize_database()
+        self.assertEqual(auth.sign_in("first", "inventory1").role, "admin")
+        self.assertEqual(auth.sign_in("second", "inventory1").role, "staff")
+
+
 class InputCheckTests(unittest.TestCase):
     def test_good_quantities(self):
         self.assertEqual(parse_quantity("25"), 25)

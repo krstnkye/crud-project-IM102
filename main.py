@@ -9,7 +9,8 @@ import auth
 import database
 import theme
 from auth_screen import AuthScreen
-from profile_page import ProfilePage, nice_time
+from admin_page import AdminPage
+from profile_page import ProfilePage, nice_time, role_badge
 from theme import COLORS, FlatButton
 from validation import ValidationError, parse_price, parse_quantity, validate_product
 
@@ -32,8 +33,10 @@ TABLE_COLUMNS_BY_KEY = {sort_key: heading for heading, width, anchor, sort_key i
 LOG_COLORS = {
     "BOOT": "primary", "ADD": "green", "RESTOCK": "green", "UPDATE": "primary", "DELETE": "red", "ALERT": "amber",
     "ERROR": "red", "THEME": "muted", "SIGN IN": "secondary", "SIGN UP": "secondary", "SIGN OUT": "muted",
-    "PROFILE": "amber", "PASSWORD": "amber",
+    "PROFILE": "amber", "PASSWORD": "amber", "ROLE": "amber", "ACCOUNT": "amber",
 }
+
+PAGE_TITLES = {"inventory": "Product Inventory System", "profile": "My Dashboard", "admin": "Admin Dashboard"}
 
 WINDOW_TITLE = "Product Inventory System"
 
@@ -89,7 +92,8 @@ class InventoryApp:
         self.log_entries = []
         self.viewer = None
         self.page = "inventory"
-        self.profile_page = None
+        self.page_user_id = None
+        self.page_view = None
         self.nav_widgets = {}
 
         database.initialize_database()
@@ -146,7 +150,7 @@ class InventoryApp:
         body = tk.Frame(self.root, bg=COLORS["page"])
         body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.body = body
-        self.profile_page = None
+        self.page_view = None
         self.build_header(body)
         self.build_footer(body)
 
@@ -225,8 +229,14 @@ class InventoryApp:
         self.caps(bar, "Menu", bg=COLORS["sidebar"], size=7, padx=16, pady=10).pack(anchor=tk.W, pady=(8, 0))
         menu = [
             ("▦", "Inventory", lambda: self.show_page("inventory"), True),
-            ("●", "My Profile", lambda: self.show_page("profile"), False),
-            ("⛁", "Database Records", self.open_database_viewer, False),
+            ("●", "My Dashboard", lambda: self.show_page("profile"), False),
+        ]
+        if self.user.is_admin:
+            menu += [
+                ("★", "Admin Dashboard", lambda: self.show_page("admin"), False),
+                ("⛁", "Database Records", self.open_database_viewer, False),
+            ]
+        menu += [
             ("+", "New Product", self.start_new_product, False),
             ("☀" if theme.MODE == "dark" else "☾", "Light Mode" if theme.MODE == "dark" else "Dark Mode", self.toggle_theme, False),
         ]
@@ -268,7 +278,10 @@ class InventoryApp:
         names.pack(side=tk.LEFT, padx=(8, 0), fill=tk.X, expand=True)
         full_name = self.user.full_name if len(self.user.full_name) <= 18 else self.user.full_name[:17] + "…"
         tk.Label(names, text=full_name, bg=COLORS["card"], fg=COLORS["strong"], font=sans(9, "bold"), anchor=tk.W).pack(fill=tk.X)
-        tk.Label(names, text=f"@{self.user.username}", bg=COLORS["card"], fg=COLORS["muted"], font=sans(8), anchor=tk.W).pack(fill=tk.X)
+        line = tk.Frame(names, bg=COLORS["card"])
+        line.pack(fill=tk.X)
+        tk.Label(line, text=f"@{self.user.username}", bg=COLORS["card"], fg=COLORS["muted"], font=sans(8), anchor=tk.W).pack(side=tk.LEFT)
+        role_badge(line, self.user.role).pack(side=tk.LEFT, padx=(6, 0))
         FlatButton(
             card, "Sign Out", self.sign_out, COLORS["card_high"], COLORS["dim"], COLORS["red_soft"],
             font_size=8, pady=5, border=COLORS["line_high"], hover_fg=COLORS["red"],
@@ -308,22 +321,38 @@ class InventoryApp:
         stripe.configure(bg=COLORS["primary"] if active else bg)
         text_label.configure(bg=bg, fg=COLORS["strong"] if active else COLORS["dim"], font=sans(9, "bold" if active else "normal"))
 
-    def show_page(self, page):
-        """Switch the main area between the inventory and the My Profile page."""
-        self.page = page
-        if page == "profile":
-            self.shell.pack_forget()
-            if self.profile_page is None or not self.profile_page.frame.winfo_exists():
-                self.profile_page = ProfilePage(self.body, self)
-            else:
-                self.profile_page.load()
-            self.profile_page.frame.pack(fill=tk.BOTH, expand=True)
-        else:
-            if self.profile_page is not None and self.profile_page.frame.winfo_exists():
-                self.profile_page.frame.pack_forget()
+    def show_page(self, page, user_id=None):
+        """Switch the main area between Inventory, My Dashboard, Admin Dashboard, and a team member's profile.
+
+        Every page opens inside this window, never in a new one.
+        """
+        if page == "admin" and not self.user.is_admin:
+            page = "profile"
+        if user_id == self.user.user_id:
+            user_id = None
+        if page == "profile" and user_id is not None and not self.user.is_admin:
+            user_id = None
+        self.page, self.page_user_id = page, user_id
+
+        if self.page_view is not None and self.page_view.frame.winfo_exists():
+            self.page_view.frame.destroy()
+        self.page_view = None
+        if page == "inventory":
             self.shell.pack(fill=tk.BOTH, expand=True)
+        else:
+            self.shell.pack_forget()
+            self.page_view = AdminPage(self.body, self) if page == "admin" else ProfilePage(self.body, self, user_id)
+            self.page_view.frame.pack(fill=tk.BOTH, expand=True)
+
+        if page == "profile" and user_id is not None and self.page_view.row is not None:
+            title = f"Profile: {self.page_view.row['full_name']}"
+        else:
+            title = PAGE_TITLES[page]
+        self.header_title.configure(text=title)
         self.paint_nav("Inventory", page == "inventory")
-        self.paint_nav("My Profile", page == "profile")
+        self.paint_nav("My Dashboard", page == "profile" and user_id is None)
+        if "Admin Dashboard" in self.nav_widgets:
+            self.paint_nav("Admin Dashboard", page == "admin" or (page == "profile" and user_id is not None))
 
     def on_profile_changed(self):
         """The user's name changed: update the window title, side menu, and header."""
@@ -351,7 +380,8 @@ class InventoryApp:
 
         left = tk.Frame(header, bg=COLORS["header"])
         left.pack(side=tk.LEFT, fill=tk.Y)
-        tk.Label(left, text="Product Inventory System", bg=COLORS["header"], fg=COLORS["strong"], font=sans(14, "bold")).pack(side=tk.LEFT)
+        self.header_title = tk.Label(left, text=PAGE_TITLES["inventory"], bg=COLORS["header"], fg=COLORS["strong"], font=sans(14, "bold"))
+        self.header_title.pack(side=tk.LEFT)
 
         pill = tk.Frame(left, bg=COLORS["card_high"], padx=8, pady=3, highlightthickness=1, highlightbackground=COLORS["line_high"])
         pill.pack(side=tk.LEFT, padx=(16, 0))
@@ -364,10 +394,11 @@ class InventoryApp:
             right, "New Product", self.start_new_product, COLORS["button"], COLORS["button_text"], COLORS["primary_hover"],
             font_size=8, pady=6, border=COLORS["button"],
         ).pack(side=tk.RIGHT, pady=12)
-        FlatButton(
-            right, "Database Records", self.open_database_viewer, COLORS["card_high"], COLORS["text"], COLORS["card_top"],
-            font_size=8, pady=6, border=COLORS["line_high"], hover_fg=COLORS["strong"],
-        ).pack(side=tk.RIGHT, padx=(0, 8), pady=12)
+        if self.user.is_admin:
+            FlatButton(
+                right, "Database Records", self.open_database_viewer, COLORS["card_high"], COLORS["text"], COLORS["card_top"],
+                font_size=8, pady=6, border=COLORS["line_high"], hover_fg=COLORS["strong"],
+            ).pack(side=tk.RIGHT, padx=(0, 8), pady=12)
         toggle_text = "Light Mode" if theme.MODE == "dark" else "Dark Mode"
         FlatButton(
             right, toggle_text, self.toggle_theme, COLORS["card_high"], COLORS["text"], COLORS["card_top"],
@@ -669,7 +700,8 @@ class InventoryApp:
         )
         self.error_var.trace_add("write", self.show_or_hide_error)
 
-        note = tk.Label(form, text="Every change is saved to inventory.db right away.", bg=COLORS["card"], fg=COLORS["faint"], font=sans(8), anchor=tk.W)
+        note_text = "Every change is saved with your name." if self.user.is_admin else "Only an admin can delete products."
+        note = tk.Label(form, text=note_text, bg=COLORS["card"], fg=COLORS["faint"], font=sans(8), anchor=tk.W)
         note.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
 
         buttons = tk.Frame(form, bg=COLORS["card"])
@@ -807,7 +839,7 @@ class InventoryApp:
 
     def set_edit_mode(self, editing):
         self.update_button.set_enabled(editing)
-        self.delete_button.set_enabled(editing)
+        self.delete_button.set_enabled(editing and self.user.is_admin)
         if editing:
             self.form_title.configure(text="Edit Product")
             self.form_subtitle.configure(text=f"Change the details of P{self.selected_product_id:03d}, then click Update.")
@@ -900,7 +932,7 @@ class InventoryApp:
 
     def rebuild_screen(self):
         """Draw the whole window again (after a theme or name change), keeping what was typed."""
-        page = self.page
+        page, page_user_id = self.page, self.page_user_id
         if self.toast_job:
             self.root.after_cancel(self.toast_job)
             self.toast_job = None
@@ -920,8 +952,8 @@ class InventoryApp:
         self.build_interface()
         self.refresh_data()
         self.set_edit_mode(self.selected_product_id is not None)
-        if page == "profile":
-            self.show_page("profile")
+        if page != "inventory":
+            self.show_page(page, page_user_id)
         if viewer_was_open:
             self.open_database_viewer()
 
@@ -929,8 +961,11 @@ class InventoryApp:
         return self.viewer is not None and self.viewer.root.winfo_exists()
 
     def open_database_viewer(self):
-        """Open the DB Records window, or bring it to the front if it is already open."""
+        """Open the DB Records window, or bring it to the front if it is already open (admins only)."""
         import database_viewer
+
+        if not self.user.is_admin:
+            return
 
         if self.viewer_is_open():
             self.viewer.load_records()
@@ -1027,6 +1062,9 @@ class InventoryApp:
         self.show_toast("Product updated successfully.")
 
     def delete_product(self):
+        if not self.user.is_admin:
+            self.show_error("Only an admin can delete products. Ask an admin to do it.")
+            return
         if self.selected_product_id is None:
             self.show_error("Please select a product to delete.")
             return

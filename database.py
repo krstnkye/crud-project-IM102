@@ -68,10 +68,27 @@ def initialize_database():
                 full_name TEXT NOT NULL CHECK(length(trim(full_name)) > 0),
                 password_hash TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                last_login TEXT
+                last_login TEXT,
+                role TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('admin', 'staff')),
+                is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1))
             )
             """
         )
+        # Databases made before roles existed: add the columns and make the first account the admin.
+        user_columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)")}
+        if "role" not in user_columns:
+            connection.execute(
+                "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'staff' CHECK(role IN ('admin', 'staff'))"
+            )
+        if "is_active" not in user_columns:
+            connection.execute(
+                "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1))"
+            )
+        has_admin = connection.execute("SELECT 1 FROM users WHERE role = 'admin' AND is_active = 1").fetchone()
+        if not has_admin:
+            connection.execute(
+                "UPDATE users SET role = 'admin', is_active = 1 WHERE user_id = (SELECT MIN(user_id) FROM users)"
+            )
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS activity_log (
@@ -88,16 +105,16 @@ def initialize_database():
 # ---------------------------------------------------------------- users
 
 
-def create_user(username, full_name, password_hash):
+def create_user(username, full_name, password_hash, role="staff"):
     """Save a new user. Returns the new user_id, or None if the username is already taken."""
     try:
         with database_connection() as connection:
             cursor = connection.execute(
                 """
-                INSERT INTO users (username, full_name, password_hash, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO users (username, full_name, password_hash, created_at, role)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (username, full_name, password_hash, now_text()),
+                (username, full_name, password_hash, now_text(), role),
             )
             return cursor.lastrowid
     except sqlite3.IntegrityError:
@@ -108,7 +125,7 @@ def get_user_by_username(username):
     with database_connection() as connection:
         return connection.execute(
             """
-            SELECT user_id, username, full_name, password_hash, created_at, last_login
+            SELECT user_id, username, full_name, password_hash, created_at, last_login, role, is_active
             FROM users
             WHERE username = ? COLLATE NOCASE
             """,
@@ -124,9 +141,24 @@ def update_full_name(user_id, full_name):
 def get_user_by_id(user_id):
     with database_connection() as connection:
         return connection.execute(
-            "SELECT user_id, username, full_name, password_hash, created_at, last_login FROM users WHERE user_id = ?",
+            "SELECT user_id, username, full_name, password_hash, created_at, last_login, role, is_active FROM users WHERE user_id = ?",
             (user_id,),
         ).fetchone()
+
+
+def set_role(user_id, role):
+    with database_connection() as connection:
+        connection.execute("UPDATE users SET role = ? WHERE user_id = ?", (role, user_id))
+
+
+def set_active(user_id, active):
+    with database_connection() as connection:
+        connection.execute("UPDATE users SET is_active = ? WHERE user_id = ?", (1 if active else 0, user_id))
+
+
+def count_active_admins():
+    with database_connection() as connection:
+        return connection.execute("SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1").fetchone()[0]
 
 
 def set_password_hash(user_id, password_hash):
@@ -201,6 +233,7 @@ def get_team_summary():
         return connection.execute(
             f"""
             SELECT users.user_id, users.username, users.full_name, users.created_at, users.last_login,
+                   users.role, users.is_active,
                    COUNT(activity_log.log_id) AS changes,
                    MAX(activity_log.created_at) AS last_change
             FROM users
@@ -208,10 +241,37 @@ def get_team_summary():
               ON activity_log.user_id = users.user_id
              AND activity_log.action IN ({",".join("?" * len(PRODUCT_ACTIONS))})
             GROUP BY users.user_id
-            ORDER BY changes DESC, users.username COLLATE NOCASE
+            ORDER BY users.role, changes DESC, users.username COLLATE NOCASE
             """,
             PRODUCT_ACTIONS,
         ).fetchall()
+
+
+def get_all_activity(limit=200, product_changes_only=False):
+    """Everyone's saved actions, newest first, for the Admin Dashboard."""
+    where = f"WHERE activity_log.action IN ({','.join('?' * len(PRODUCT_ACTIONS))})" if product_changes_only else ""
+    parameters = (*PRODUCT_ACTIONS, limit) if product_changes_only else (limit,)
+    with database_connection() as connection:
+        return connection.execute(
+            f"""
+            SELECT activity_log.log_id, activity_log.action, activity_log.details, activity_log.created_at,
+                   users.username, users.user_id
+            FROM activity_log
+            LEFT JOIN users ON users.user_id = activity_log.user_id
+            {where}
+            ORDER BY activity_log.log_id DESC
+            LIMIT ?
+            """,
+            parameters,
+        ).fetchall()
+
+
+def count_changes_since(moment_text):
+    with database_connection() as connection:
+        return connection.execute(
+            f"SELECT COUNT(*) FROM activity_log WHERE created_at >= ? AND action IN ({','.join('?' * len(PRODUCT_ACTIONS))})",
+            (moment_text, *PRODUCT_ACTIONS),
+        ).fetchone()[0]
 
 
 def get_recent_activity(limit=50):
