@@ -43,6 +43,7 @@ crud-project-IM102/
 |-- test_database.py     (automatic tests)
 |-- inventory.db (created automatically after the app starts)
 |-- README.md
+|-- HOW_TO_RUN.txt       (short guide for running the app)
 |-- .gitignore
 |-- documentation/
 |   |-- IM102_Inventory_System_Documentation.docx
@@ -50,6 +51,7 @@ crud-project-IM102/
 |   `-- flowchart.png
 `-- screenshots/
     |-- README.md
+|-- HOW_TO_RUN.txt       (short guide for running the app)
     `-- (pictures used in the documentation)
 ```
 
