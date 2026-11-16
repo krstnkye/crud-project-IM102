@@ -1,20 +1,39 @@
 flowchart TD
-    A([Start]) --> B[Open Application]
-    B --> C[Load SQLite Database]
-    C --> D[Display Product Table and Dashboard Totals]
-    D --> E{Select Operation}
-    E -->|Add| F[Enter New Product Details]
-    E -->|Update| G[Select Product and Edit Details]
-    E -->|Delete| H[Select Product to Delete]
+    A([Start]) --> B["Open the app (run main.py)"]
+    B --> C["Load inventory.db (make the tables if missing)"]
+    C --> SI["Sign In screen"]
+    SI -->|New user| CA["Create Account: full name,<br/>username, password two times"]
+    CA --> CV{"Valid and<br/>username free?"}
+    CV -->|No| CE[Show red error message]
+    CE --> T1(["Back to Create Account"])
+    CV -->|Yes| CS["Save the user with a salted password hash<br/>(first account is Admin, others Staff),<br/>show Account created"]
+    CS --> T2(["Back to Sign In"])
+    SI -->|Sign in| V{"Username and password correct<br/>and account turned on?"}
+    V -->|No| VE["Show red error message<br/>(pause after 5 wrong tries)"]
+    VE --> T3(["Back to Sign In"])
+    V -->|Yes| D["Main window: product table, summary cards,<br/>and saved activity log"]
+    D --> E{Choose an action}
+    E -->|Add| F[Type the product details]
+    E -->|Update| G[Click a product and change details]
+    E -->|Delete| X{Is the user an Admin?}
+    E -->|My Dashboard| PR["My Dashboard (same window): my details,<br/>my activity, edit name, change password"]
+    E -->|Admin Dashboard| AD{Is the user an Admin?}
+    E -->|Sign out| SO(["Back to Sign In"])
     E -->|Exit| Z([End])
-    F --> I{Valid Input?}
+    F --> I{Is the input valid?}
     G --> I
-    I -->|No| J[Show Error Message]
-    J --> D
-    I -->|Yes| K[Save Changes to Database]
-    H --> L{Confirm Delete?}
-    L -->|No| D
-    L -->|Yes| K
-    K --> M[Refresh Table and Dashboard Totals]
-    M --> N[Show Success Message]
-    N --> D
+    I -->|No| J[Show red error message in form]
+    I -->|Yes| K["Save the change to inventory.db<br/>with who did it and when"]
+    X -->|No| XN["Show: Only an admin can delete products"]
+    X -->|Yes| Q{Confirm delete?}
+    Q -->|Yes| K
+    Q -->|No| R2(["Back to main window"])
+    XN --> R5(["Back to main window"])
+    K --> N["Refresh the table and cards,<br/>show success message"]
+    J --> R1(["Back to main window"])
+    N --> R3(["Back to main window"])
+    PR --> R4(["Back to main window"])
+    AD -->|No| PR
+    AD -->|Yes| AP["Admin Dashboard (same window): team list,<br/>everyone's activity, changes today and this week"]
+    AP --> OP["Open a team member's profile (same window):<br/>make Admin or Staff, turn account on or off,<br/>reset password"]
+    OP --> R6(["Back to Admin Dashboard"])

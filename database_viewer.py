@@ -24,6 +24,47 @@ QUERIES = {
     "Sort by price": (f"{SELECT} ORDER BY unit_price DESC", ()),
 }
 
+# The three tables in inventory.db, with their columns, widths, and quick queries.
+TABLES = {
+    "products": {
+        "columns": COLUMNS + ("created_by", "updated_by", "updated_at"),
+        "widths": {"product_id": 130, "product_name": 190, "category": 130, "quantity": 120, "unit_price": 110,
+                   "created_by": 120, "updated_by": 120, "updated_at": 150},
+        "right": ("quantity", "unit_price"),
+        "queries": QUERIES,
+    },
+    "users": {
+        "columns": ("user_id", "username", "full_name", "password_hash", "created_at", "last_login"),
+        "widths": {"user_id": 150, "username": 150, "full_name": 170, "password_hash": 260, "created_at": 150, "last_login": 150},
+        "right": (),
+        "queries": {"All users": ("SELECT * FROM users ORDER BY user_id", ())},
+    },
+    "activity_log": {
+        "columns": ("log_id", "user_id", "action", "details", "created_at"),
+        "widths": {"log_id": 150, "user_id": 140, "action": 110, "details": 420, "created_at": 160},
+        "right": (),
+        "queries": {
+            "Latest 200": ("SELECT * FROM activity_log ORDER BY log_id DESC LIMIT 200", ()),
+            "Product changes": (
+                "SELECT * FROM activity_log WHERE action IN ('ADD', 'RESTOCK', 'UPDATE', 'DELETE') ORDER BY log_id DESC LIMIT 200",
+                (),
+            ),
+        },
+    },
+}
+
+
+def show_value(column, value):
+    """How one saved value is shown in the table."""
+    if value is None:
+        return "NULL"
+    if column == "unit_price":
+        return f"{value:.2f}"
+    if column == "password_hash":
+        # Only the start is shown: enough to prove it is a salted hash, not the password.
+        return value[:34] + "…"
+    return value
+
 
 def sans(size, weight="normal"):
     return (theme.FONT, size, weight)
@@ -43,14 +84,16 @@ class DatabaseViewer:
         theme.load_fonts(self.root)
         theme.apply_ttk_theme(self.root)
 
+        self.table_name = "products"
         self.query_name = "All rows"
         self.records = []
         self.preset_buttons = {}
+        self.table_buttons = {}
 
         self.sql_var = tk.StringVar()
         self.table_title_var = tk.StringVar()
         self.status_var = tk.StringVar()
-        self.info_vars = {name: tk.StringVar(value="--") for name in ("SQLite version", "Journal mode", "File size", "Total rows", "Integrity check")}
+        self.info_vars = {name: tk.StringVar(value="--") for name in ("SQLite version", "File size", "Product rows", "Database check")}
 
         self.build_screen()
         self.load_records()
@@ -81,7 +124,7 @@ class DatabaseViewer:
 
         left = tk.Frame(header, bg=COLORS["header"])
         left.pack(side=tk.LEFT)
-        tk.Label(left, text="products table", bg=COLORS["primary_soft"], fg=COLORS["primary"], font=sans(8, "bold"), padx=6).pack(anchor=tk.W)
+        tk.Label(left, text="3 tables", bg=COLORS["primary_soft"], fg=COLORS["primary"], font=sans(8, "bold"), padx=6).pack(anchor=tk.W)
         line = tk.Frame(left, bg=COLORS["header"])
         line.pack(anchor=tk.W, pady=(4, 0))
         tk.Label(line, text="Database Records", bg=COLORS["header"], fg=COLORS["strong"], font=sans(16, "bold")).pack(side=tk.LEFT)
@@ -109,20 +152,35 @@ class DatabaseViewer:
             tk.Label(tile, text=name, bg=COLORS["card"], fg=COLORS["muted"], font=sans(8)).pack(anchor=tk.W)
             label = tk.Label(tile, textvariable=variable, bg=COLORS["card"], fg=COLORS["strong"], font=sans(11, "bold"))
             label.pack(anchor=tk.W)
-            if name == "Integrity check":
+            if name == "Database check":
                 self.integrity_label = label
 
     def build_query_bar(self, parent):
+        picker = tk.Frame(parent, bg=COLORS["page"])
+        picker.pack(fill=tk.X, pady=(12, 0))
+        tk.Label(picker, text="Table:", bg=COLORS["page"], fg=COLORS["muted"], font=sans(9)).pack(side=tk.LEFT, padx=(0, 4))
+        for name in TABLES:
+            button = FlatButton(
+                picker, name, lambda value=name: self.show_table(value), COLORS["card_high"], COLORS["dim"], COLORS["card_top"],
+                font_size=9, padx=12, pady=5, border=COLORS["line"], hover_fg=COLORS["strong"],
+            )
+            button.pack(side=tk.LEFT, padx=(6, 0))
+            self.table_buttons[name] = button
+
         bar = tk.Frame(parent, bg=COLORS["input"], padx=12, pady=7, highlightthickness=1, highlightbackground=COLORS["line_high"])
-        bar.pack(fill=tk.X, pady=(12, 0))
+        bar.pack(fill=tk.X, pady=(10, 0))
         tk.Label(bar, text="SQL", bg=COLORS["input"], fg=COLORS["primary"], font=sans(9, "bold")).pack(side=tk.LEFT)
         tk.Label(bar, textvariable=self.sql_var, bg=COLORS["input"], fg=COLORS["text"], font=code(9), anchor=tk.W).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 10)
         )
 
-    def build_presets(self, parent):
-        tk.Label(parent, text="Quick queries:", bg=COLORS["card"], fg=COLORS["muted"], font=sans(8)).pack(side=tk.LEFT, padx=(16, 2))
-        for name in QUERIES:
+    def build_presets(self, parent=None):
+        parent = parent or self.preset_frame
+        for widget in parent.winfo_children():
+            widget.destroy()
+        self.preset_buttons = {}
+        tk.Label(parent, text="Show:", bg=COLORS["card"], fg=COLORS["muted"], font=sans(8)).pack(side=tk.LEFT, padx=(16, 2))
+        for name in TABLES[self.table_name]["queries"]:
             button = FlatButton(
                 parent, name, lambda value=name: self.run_preset(value), COLORS["card_high"], COLORS["dim"], COLORS["card_top"],
                 font_size=8, padx=9, pady=3, border=COLORS["line"], hover_fg=COLORS["strong"], weight="normal",
@@ -137,21 +195,17 @@ class DatabaseViewer:
         top = tk.Frame(card, bg=COLORS["card"], padx=16, pady=9)
         top.pack(fill=tk.X)
         tk.Label(top, textvariable=self.table_title_var, bg=COLORS["card"], fg=COLORS["strong"], font=sans(11, "bold")).pack(side=tk.LEFT)
-        self.build_presets(top)
+        self.preset_frame = tk.Frame(top, bg=COLORS["card"])
+        self.preset_frame.pack(side=tk.LEFT)
+        self.build_presets()
 
         table_area = tk.Frame(card, bg=COLORS["card"])
         table_area.pack(fill=tk.BOTH, expand=True)
         table_area.rowconfigure(0, weight=1)
         table_area.columnconfigure(0, weight=1)
 
-        types = self.column_types()
-        widths = {"product_id": 130, "product_name": 260, "category": 170, "quantity": 130, "unit_price": 140}
-        anchors = {"product_id": tk.W, "quantity": tk.E, "unit_price": tk.E}
         self.tree = ttk.Treeview(table_area, columns=COLUMNS, show="headings", selectmode="browse", height=5)
-        for column in COLUMNS:
-            anchor = anchors.get(column, tk.W)
-            self.tree.heading(column, text=f"{column}  ({types.get(column, '')})", anchor=anchor)
-            self.tree.column(column, width=widths[column], minwidth=80, anchor=anchor)
+        self.set_columns()
 
         self.tree.tag_configure("even", background=COLORS["card"])
         self.tree.tag_configure("odd", background=COLORS["row_alt"])
@@ -175,15 +229,15 @@ class DatabaseViewer:
 
         outer, schema = self.panel(row)
         outer.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
-        tk.Label(schema, text="Table Schema", bg=COLORS["card"], fg=COLORS["primary"], font=sans(9, "bold")).pack(anchor=tk.W)
+        tk.Label(schema, text="Table Columns", bg=COLORS["card"], fg=COLORS["primary"], font=sans(9, "bold")).pack(anchor=tk.W)
         self.schema_box = self.text_box(schema)
 
         outer, console = self.panel(row)
         outer.grid(row=0, column=1, sticky="nsew")
         top = tk.Frame(console, bg=COLORS["card"])
         top.pack(fill=tk.X)
-        tk.Label(top, text="Query Log", bg=COLORS["card"], fg=COLORS["primary"], font=sans(9, "bold")).pack(side=tk.LEFT)
-        tk.Label(top, text="Queries run in this window", bg=COLORS["card"], fg=COLORS["faint"], font=sans(8)).pack(side=tk.RIGHT)
+        tk.Label(top, text="SQL History", bg=COLORS["card"], fg=COLORS["primary"], font=sans(9, "bold")).pack(side=tk.LEFT)
+        tk.Label(top, text="SQL commands run in this window", bg=COLORS["card"], fg=COLORS["faint"], font=sans(8)).pack(side=tk.RIGHT)
         self.log_box = self.text_box(console)
         self.log_box.tag_configure("time", foreground=COLORS["faint"])
         self.log_box.tag_configure("ok", foreground=COLORS["primary"])
@@ -199,37 +253,73 @@ class DatabaseViewer:
 
     # ------------------------------------------------------------------ data
 
-    def column_types(self):
+    def column_types(self, table="products"):
+        if table not in TABLES:
+            return {}
         with database.database_connection() as connection:
-            info = connection.execute("PRAGMA table_info(products)").fetchall()
+            info = connection.execute(f"PRAGMA table_info({table})").fetchall()
         return {name: f"{kind} PK" if primary_key else kind for _, name, kind, _, _, primary_key in info}
+
+    def set_columns(self):
+        table = TABLES[self.table_name]
+        types = self.column_types(self.table_name)
+        self.tree.configure(columns=table["columns"])
+        for column in table["columns"]:
+            anchor = tk.E if column in table["right"] else tk.W
+            self.tree.heading(column, text=f"{column}  ({types.get(column, '')})", anchor=anchor)
+            self.tree.column(column, width=table["widths"][column], minwidth=70, anchor=anchor)
+
+    def show_table(self, name):
+        if name == self.table_name:
+            return
+        self.table_name = name
+        self.query_name = next(iter(TABLES[name]["queries"]))
+        self.set_columns()
+        self.build_presets()
+        self.load_records()
 
     def run_preset(self, name):
         self.query_name = name
         self.load_records()
 
     def load_records(self):
-        sql, parameters = QUERIES[self.query_name]
+        if not self.root.winfo_exists():
+            return
+        table = TABLES[self.table_name]
+        sql, parameters = table["queries"][self.query_name]
         started = time.perf_counter()
-        with database.database_connection() as connection:
-            self.records = connection.execute(sql, parameters).fetchall()
-            total_rows = connection.execute("SELECT COUNT(*), COALESCE(SUM(quantity), 0) FROM products").fetchone()
-            journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
-            integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
-            schema = connection.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'products'").fetchone()
+        try:
+            with database.database_connection() as connection:
+                self.records = connection.execute(sql, parameters).fetchall()
+                total_rows = connection.execute("SELECT COUNT(*), COALESCE(SUM(quantity), 0) FROM products").fetchone()
+                integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+                schema = connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (self.table_name,)
+                ).fetchone()
+        except sqlite3.DatabaseError as error:
+            self.status_var.set(f"Could not read {DB_PATH.name}: {error}")
+            return
         fetch_ms = (time.perf_counter() - started) * 1000
 
         for item in self.tree.get_children():
             self.tree.delete(item)
         for index, record in enumerate(self.records):
-            product_id, name, category, quantity, unit_price = record
             self.tree.insert(
-                "", tk.END, values=(product_id, name, category, quantity, f"{unit_price:.2f}"),
+                "", tk.END, values=tuple(show_value(column, record[column]) for column in table["columns"]),
                 tags=("even" if index % 2 == 0 else "odd",),
             )
 
         shown_sql = sql.replace("?", str(parameters[0])) if parameters else sql
         self.sql_var.set(f"{shown_sql};")
+        for name, button in self.table_buttons.items():
+            active = name == self.table_name
+            button.colors = (
+                COLORS["primary"] if active else COLORS["card_high"],
+                COLORS["button_text"] if active else COLORS["dim"],
+                COLORS["primary_hover"] if active else COLORS["card_top"],
+                COLORS["button_text"] if active else COLORS["strong"],
+            )
+            button.configure(bg=button.colors[0], fg=button.colors[1], highlightbackground=COLORS["primary"] if active else COLORS["line"])
         for name, button in self.preset_buttons.items():
             active = name == self.query_name
             button.colors = (
@@ -241,21 +331,20 @@ class DatabaseViewer:
             button.configure(bg=button.colors[0], fg=button.colors[1])
 
         count = len(self.records)
-        self.table_title_var.set(f"Table: products  ({count} row{'s' if count != 1 else ''} returned)")
+        self.table_title_var.set(f"Table: {self.table_name}  ({count} row{'s' if count != 1 else ''} returned)")
         self.status_var.set(
             f"{total_rows[0]} product record(s)  ·  Read directly from {DB_PATH.name}  ·  "
-            f"Updates by itself after every change  ·  Fetch time {fetch_ms:.1f} ms"
+            f"Updates by itself after every change  ·  Loaded in {fetch_ms:.1f} ms"
         )
 
         size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
         self.info_vars["SQLite version"].set(sqlite3.sqlite_version)
-        self.info_vars["Journal mode"].set(str(journal_mode).upper())
         self.info_vars["File size"].set(f"{size / 1024:,.1f} KB")
-        self.info_vars["Total rows"].set(f"{total_rows[0]} rows  ·  {total_rows[1]:,} units")
-        self.info_vars["Integrity check"].set("OK" if integrity == "ok" else str(integrity))
+        self.info_vars["Product rows"].set(f"{total_rows[0]} rows  ·  {total_rows[1]:,} units")
+        self.info_vars["Database check"].set("OK" if integrity == "ok" else str(integrity))
         self.integrity_label.configure(fg=COLORS["primary"] if integrity == "ok" else COLORS["red"])
 
-        ddl = schema[0].replace("(", "(\n    ", 1).replace(", ", ",\n    ") if schema else "No products table yet."
+        ddl = " ".join(schema[0].split()).replace("( ", "(\n    ", 1).replace(", ", ",\n    ") if schema else f"No {self.table_name} table yet."
         self.set_text(self.schema_box, ddl.rstrip(")") + "\n);" if schema else ddl)
         self.add_log(f"{shown_sql};", f"{count} row(s) in {fetch_ms:.1f} ms")
 
@@ -279,18 +368,20 @@ class DatabaseViewer:
     def export_csv(self):
         path = filedialog.asksaveasfilename(
             parent=self.root,
-            title="Export products to CSV",
+            title=f"Export {self.table_name} to CSV",
             defaultextension=".csv",
-            initialfile=f"products_{datetime.now():%Y-%m-%d}.csv",
+            initialfile=f"{self.table_name}_{datetime.now():%Y-%m-%d}.csv",
             filetypes=[("CSV file", "*.csv"), ("All files", "*.*")],
         )
         if not path:
             return
         try:
+            # Password hashes are never exported.
+            columns = [c for c in TABLES[self.table_name]["columns"] if c != "password_hash"]
             with open(path, "w", newline="", encoding="utf-8-sig") as file:
                 writer = csv.writer(file)
-                writer.writerow(COLUMNS)
-                writer.writerows(self.records)
+                writer.writerow(columns)
+                writer.writerows([[record[c] for c in columns] for record in self.records])
         except OSError as error:
             messagebox.showerror("Export failed", f"The file could not be saved.\n\n{error}", parent=self.root)
             return
