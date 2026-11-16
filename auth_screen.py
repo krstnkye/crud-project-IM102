@@ -30,6 +30,7 @@ class AuthScreen:
 
         self.vars = {name: tk.StringVar() for name in ("full_name", "username", "password", "confirm")}
         self.error_var = tk.StringVar()
+        self.message_kind = "error"  # "error" (red) or "success" (green) for the message under the form
         self.entries = {}
 
         self.root.title("Sign In - Product Inventory System")
@@ -214,18 +215,25 @@ class AuthScreen:
         entry.bind("<FocusOut>", lambda e: box.configure(highlightbackground=COLORS["line_high"]), add="+")
         entry.bind("<Return>", lambda event: self.submit())
         entry.bind("<KeyRelease>", self.check_caps_lock, add="+")
-        entry.bind("<Key>", lambda event: self.error_var.get() and self.clear_error(), add="+")
+        entry.bind("<Key>", lambda event: self.message_kind == "error" and self.error_var.get() and self.clear_error(), add="+")
         self.entries[name] = entry
 
     # ---------------------------------------------------------------- behavior
 
     def show_or_hide_error(self):
+        if not self.error_label.winfo_exists():
+            return
+        if self.message_kind == "success":
+            self.error_label.configure(bg=COLORS["green_soft"], fg=COLORS["green"])
+        else:
+            self.error_label.configure(bg=COLORS["red_soft"], fg=COLORS["red"])
         if self.error_var.get():
             self.error_label.pack(fill=tk.X, pady=(12, 0))
         else:
             self.error_label.pack_forget()
 
     def show_error(self, message, field=None):
+        self.message_kind = "error"
         self.error_var.set(f"⚠  {message}")
         self.show_or_hide_error()
         entry = self.entries.get(field)
@@ -262,6 +270,7 @@ class AuthScreen:
         self.vars["password"].set("")
         self.vars["confirm"].set("")
         self.error_var.set("")
+        self.message_kind = "error"
         self.tabs.destroy()
         self.form_area.destroy()
         self.build_tabs()
@@ -299,10 +308,25 @@ class AuthScreen:
             self.submit_button.set_enabled(True)
             raise
 
+        self.busy = False
         self.vars["password"].set("")
         self.vars["confirm"].set("")
+
+        if self.mode == "sign_up":
+            # A new account does not sign in by itself: the user signs in with the details they just made.
+            self.vars["full_name"].set("")
+            self.vars["username"].set(user.username)
+            self.switch_mode("sign_in")
+            self.show_success(f"Account created for {user.full_name}. Please sign in with your new username and password.")
+            return
+
         self.destroy()
-        self.on_success(user, new_account=self.mode == "sign_up")
+        self.on_success(user)
+
+    def show_success(self, message):
+        self.message_kind = "success"
+        self.error_var.set(f"✓  {message}")
+        self.show_or_hide_error()
 
     def destroy(self):
         if self.frame.winfo_exists():

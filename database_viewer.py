@@ -27,8 +27,9 @@ QUERIES = {
 # The three tables in inventory.db, with their columns, widths, and quick queries.
 TABLES = {
     "products": {
-        "columns": COLUMNS,
-        "widths": {"product_id": 130, "product_name": 260, "category": 170, "quantity": 130, "unit_price": 140},
+        "columns": COLUMNS + ("created_by", "updated_by", "updated_at"),
+        "widths": {"product_id": 130, "product_name": 190, "category": 130, "quantity": 120, "unit_price": 110,
+                   "created_by": 120, "updated_by": 120, "updated_at": 150},
         "right": ("quantity", "unit_price"),
         "queries": QUERIES,
     },

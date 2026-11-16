@@ -8,6 +8,7 @@ The tests use a temporary database file, so your real inventory.db is not touche
 """
 
 import gc
+import sqlite3
 import tempfile
 import unittest
 import warnings
@@ -135,9 +136,12 @@ class AuthTests(unittest.TestCase):
         stored = database.get_user_by_username("JUAN_DC")
         self.assertNotIn("inventory1", stored["password_hash"])
 
+        self.assertIsNone(stored["last_login"])  # signing up does not sign in
+
         signed_in = auth.sign_in("Juan_DC", "inventory1")
         self.assertEqual(signed_in.user_id, user.user_id)
         self.assertEqual(signed_in.full_name, "Juan Dela Cruz")
+        self.assertIsNotNone(database.get_user_by_username("juan_dc")["last_login"])
 
     def test_username_must_be_unique(self):
         auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
@@ -168,6 +172,73 @@ class AuthTests(unittest.TestCase):
         rows = database.get_recent_activity()
         self.assertEqual([row["action"] for row in rows], ["SIGN UP", "ADD"])
         self.assertEqual(rows[-1]["username"], "maria")
+
+
+    def test_products_remember_who_changed_them(self):
+        juan = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
+        maria = auth.sign_up("Maria Santos", "maria", "inventory2", "inventory2")
+        database.add_product("Pen", "School Supplies", 10, 12, user_id=juan.user_id)
+        product = database.get_products()[0]
+        self.assertEqual(product["created_by_name"], "juan")
+        self.assertEqual(product["updated_by_name"], "juan")
+        database.update_product(product["product_id"], "Pen", "School Supplies", 20, 12, user_id=maria.user_id)
+        product = database.get_products()[0]
+        self.assertEqual(product["created_by_name"], "juan")
+        self.assertEqual(product["updated_by_name"], "maria")
+        self.assertIsNotNone(product["updated_at"])
+
+    def test_profile_stats_and_team(self):
+        juan = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
+        auth.sign_up("Maria Santos", "maria", "inventory2", "inventory2")
+        for action in ("ADD", "ADD", "UPDATE", "RESTOCK", "DELETE"):
+            database.add_activity(juan.user_id, action, "test")
+        stats = database.get_user_stats(juan.user_id)
+        self.assertEqual((stats["ADD"], stats["UPDATE"], stats["RESTOCK"], stats["DELETE"], stats["total"]), (2, 1, 1, 1, 5))
+        self.assertIsNotNone(stats["last_change"])
+        team = database.get_team_summary()
+        self.assertEqual([(m["username"], m["changes"]) for m in team], [("juan", 5), ("maria", 0)])
+        actions = [row["action"] for row in database.get_user_activity(juan.user_id)]
+        self.assertEqual(actions[0], "DELETE")  # newest first
+        self.assertIn("SIGN UP", actions)
+
+    def test_change_name_and_password(self):
+        user = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
+        renamed = auth.change_full_name(user, "  Juan  P. Dela Cruz ")
+        self.assertEqual(renamed.full_name, "Juan P. Dela Cruz")
+        self.assertEqual(database.get_user_by_id(user.user_id)["full_name"], "Juan P. Dela Cruz")
+
+        cases = [
+            (("wrongpass1", "newpass123", "newpass123"), "current"),
+            (("inventory1", "short1", "short1"), "new"),
+            (("inventory1", "inventory1", "inventory1"), "new"),
+            (("inventory1", "newpass123", "newpass124"), "confirm"),
+        ]
+        for values, field in cases:
+            with self.assertRaises(ValidationError) as caught:
+                auth.change_password(renamed, *values)
+            self.assertEqual(caught.exception.field, field, values)
+
+        auth.change_password(renamed, "inventory1", "newpass123", "newpass123")
+        with self.assertRaises(ValidationError):
+            auth.sign_in("juan", "inventory1")
+        self.assertEqual(auth.sign_in("juan", "newpass123").full_name, "Juan P. Dela Cruz")
+
+    def test_old_database_is_upgraded(self):
+        old_path = Path(self.folder.name) / "old.db"
+        connection = sqlite3.connect(old_path)
+        connection.execute(
+            "CREATE TABLE products (product_id INTEGER PRIMARY KEY AUTOINCREMENT, product_name TEXT NOT NULL, "
+            "category TEXT NOT NULL, quantity INTEGER NOT NULL, unit_price REAL NOT NULL)"
+        )
+        connection.execute("INSERT INTO products (product_name, category, quantity, unit_price) VALUES ('Pen', 'School Supplies', 5, 12)")
+        connection.commit()
+        connection.close()
+        database.DB_PATH = old_path
+        database.initialize_database()
+        product = database.get_products()[0]
+        self.assertEqual(product["product_name"], "Pen")
+        self.assertIsNone(product["updated_by_name"])
+        self.assertEqual(database.count_users(), 0)
 
 
 class InputCheckTests(unittest.TestCase):

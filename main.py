@@ -9,6 +9,7 @@ import auth
 import database
 import theme
 from auth_screen import AuthScreen
+from profile_page import ProfilePage, nice_time
 from theme import COLORS, FlatButton
 from validation import ValidationError, parse_price, parse_quantity, validate_product
 
@@ -31,6 +32,7 @@ TABLE_COLUMNS_BY_KEY = {sort_key: heading for heading, width, anchor, sort_key i
 LOG_COLORS = {
     "BOOT": "primary", "ADD": "green", "RESTOCK": "green", "UPDATE": "primary", "DELETE": "red", "ALERT": "amber",
     "ERROR": "red", "THEME": "muted", "SIGN IN": "secondary", "SIGN UP": "secondary", "SIGN OUT": "muted",
+    "PROFILE": "amber", "PASSWORD": "amber",
 }
 
 WINDOW_TITLE = "Product Inventory System"
@@ -86,6 +88,9 @@ class InventoryApp:
         self.started_at = datetime.now().strftime("%I:%M %p").lstrip("0")
         self.log_entries = []
         self.viewer = None
+        self.page = "inventory"
+        self.profile_page = None
+        self.nav_widgets = {}
 
         database.initialize_database()
 
@@ -140,11 +145,14 @@ class InventoryApp:
 
         body = tk.Frame(self.root, bg=COLORS["page"])
         body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.body = body
+        self.profile_page = None
         self.build_header(body)
         self.build_footer(body)
 
         shell = tk.Frame(body, bg=COLORS["page"], padx=20, pady=14)
         shell.pack(fill=tk.BOTH, expand=True)
+        self.shell = shell
         self.build_kpis(shell)
 
         main = tk.Frame(shell, bg=COLORS["page"])
@@ -216,7 +224,8 @@ class InventoryApp:
 
         self.caps(bar, "Menu", bg=COLORS["sidebar"], size=7, padx=16, pady=10).pack(anchor=tk.W, pady=(8, 0))
         menu = [
-            ("▦", "Inventory", None, True),
+            ("▦", "Inventory", lambda: self.show_page("inventory"), True),
+            ("●", "My Profile", lambda: self.show_page("profile"), False),
             ("⛁", "Database Records", self.open_database_viewer, False),
             ("+", "New Product", self.start_new_product, False),
             ("☀" if theme.MODE == "dark" else "☾", "Light Mode" if theme.MODE == "dark" else "Dark Mode", self.toggle_theme, False),
@@ -246,8 +255,9 @@ class InventoryApp:
 
     def build_user_card(self, parent):
         """Who is signed in, with a Sign Out button."""
-        card = tk.Frame(parent, bg=COLORS["card"], padx=10, pady=10, highlightthickness=1, highlightbackground=COLORS["line"])
+        card = tk.Frame(parent, bg=COLORS["card"], padx=10, pady=10, highlightthickness=1, highlightbackground=COLORS["line"], cursor="hand2")
         card.pack(fill=tk.X)
+        card.bind("<Button-1>", lambda event: self.show_page("profile"))
         row = tk.Frame(card, bg=COLORS["card"])
         row.pack(fill=tk.X)
         avatar = tk.Canvas(row, width=34, height=34, bg=COLORS["card"], highlightthickness=0)
@@ -265,23 +275,63 @@ class InventoryApp:
         ).pack(fill=tk.X, pady=(10, 0))
 
     def nav_item(self, parent, icon, text, command, active):
-        bg = COLORS["card_high"] if active else COLORS["sidebar"]
-        item = tk.Frame(parent, bg=bg, cursor="hand2")
+        item = tk.Frame(parent, cursor="hand2")
         item.pack(fill=tk.X, padx=10, pady=1)
-        tk.Frame(item, bg=COLORS["primary"] if active else bg, width=2).pack(side=tk.LEFT, fill=tk.Y)
-        icon_label = tk.Label(item, text="", bg=bg, width=1, pady=8)
+        stripe = tk.Frame(item, width=2)
+        stripe.pack(side=tk.LEFT, fill=tk.Y)
+        icon_label = tk.Label(item, text="", width=1, pady=8)
         icon_label.pack(side=tk.LEFT, padx=(4, 4))
-        text_label = tk.Label(item, text=text, bg=bg, fg=COLORS["strong"] if active else COLORS["dim"], font=sans(9, "bold" if active else "normal"))
+        text_label = tk.Label(item, text=text)
         text_label.pack(side=tk.LEFT)
+        self.nav_widgets[text] = (item, stripe, icon_label, text_label)
+        self.paint_nav(text, active)
         widgets = (item, icon_label, text_label)
-        if command is not None:
-            def hover(color):
-                for widget in widgets:
-                    widget.configure(bg=color)
-            for widget in widgets:
-                widget.bind("<Button-1>", lambda event: command())
-                widget.bind("<Enter>", lambda event: hover(COLORS["card"]))
-                widget.bind("<Leave>", lambda event: hover(COLORS["sidebar"]))
+
+        def hover(inside):
+            if getattr(item, "active", False):
+                return
+            color = COLORS["card"] if inside else COLORS["sidebar"]
+            for widget in widgets + (stripe,):
+                widget.configure(bg=color)
+
+        for widget in widgets:
+            widget.bind("<Button-1>", lambda event: command())
+            widget.bind("<Enter>", lambda event: hover(True))
+            widget.bind("<Leave>", lambda event: hover(False))
+
+    def paint_nav(self, text, active):
+        item, stripe, icon_label, text_label = self.nav_widgets[text]
+        item.active = active
+        bg = COLORS["card_high"] if active else COLORS["sidebar"]
+        for widget in (item, icon_label):
+            widget.configure(bg=bg)
+        stripe.configure(bg=COLORS["primary"] if active else bg)
+        text_label.configure(bg=bg, fg=COLORS["strong"] if active else COLORS["dim"], font=sans(9, "bold" if active else "normal"))
+
+    def show_page(self, page):
+        """Switch the main area between the inventory and the My Profile page."""
+        self.page = page
+        if page == "profile":
+            self.shell.pack_forget()
+            if self.profile_page is None or not self.profile_page.frame.winfo_exists():
+                self.profile_page = ProfilePage(self.body, self)
+            else:
+                self.profile_page.load()
+            self.profile_page.frame.pack(fill=tk.BOTH, expand=True)
+        else:
+            if self.profile_page is not None and self.profile_page.frame.winfo_exists():
+                self.profile_page.frame.pack_forget()
+            self.shell.pack(fill=tk.BOTH, expand=True)
+        self.paint_nav("Inventory", page == "inventory")
+        self.paint_nav("My Profile", page == "profile")
+
+    def on_profile_changed(self):
+        """The user's name changed: update the window title, side menu, and header."""
+        self.root.title(f"{WINDOW_TITLE} - {self.user.full_name}")
+        def redraw():
+            self.rebuild_screen()
+            self.show_toast("Your name was saved.")
+        self.root.after_idle(redraw)
 
     def draw_health(self):
         if not hasattr(self, "health_bar") or not self.health_bar.winfo_exists():
@@ -798,7 +848,9 @@ class InventoryApp:
         self.inspect_pill.configure(text=status, fg=color, bg=COLORS[f"{key}_soft"])
         name = product["product_name"]
         self.ins_name.configure(text=name if len(name) <= 34 else name[:33] + "…")
-        self.ins_id.configure(text=f"P{product['product_id']:03d}  ·  {product['category']}")
+        who = product.get("updated_by_name")
+        changed = f"  ·  Last change by @{who}, {nice_time(product.get('updated_at'))}" if who else ""
+        self.ins_id.configure(text=f"P{product['product_id']:03d}  ·  {product['category']}{changed}")
         self.ins_tiles["Stock"].configure(text=f"{quantity:,} pcs", fg=color)
         self.ins_tiles["Unit Price"].configure(text=peso(product["unit_price"]), fg=COLORS["text"])
         self.ins_tiles["Total Value"].configure(text=peso(product["total"]), fg=COLORS["text"])
@@ -843,7 +895,12 @@ class InventoryApp:
         """Switch between dark and light mode by rebuilding the screen with the new colors."""
         new_mode = "light" if theme.MODE == "dark" else "dark"
         theme.set_mode(new_mode)
+        self.rebuild_screen()
+        self.log("THEME", f"Switched to {new_mode} mode.")
 
+    def rebuild_screen(self):
+        """Draw the whole window again (after a theme or name change), keeping what was typed."""
+        page = self.page
         if self.toast_job:
             self.root.after_cancel(self.toast_job)
             self.toast_job = None
@@ -863,7 +920,8 @@ class InventoryApp:
         self.build_interface()
         self.refresh_data()
         self.set_edit_mode(self.selected_product_id is not None)
-        self.log("THEME", f"Switched to {new_mode} mode.")
+        if page == "profile":
+            self.show_page("profile")
         if viewer_was_open:
             self.open_database_viewer()
 
@@ -917,7 +975,7 @@ class InventoryApp:
             return
 
         try:
-            result = database.add_product(*values)
+            result = database.add_product(*values, user_id=self.user.user_id)
         except sqlite3.DatabaseError:
             self.database_problem("save the product")
             return
@@ -949,7 +1007,7 @@ class InventoryApp:
 
         product_id = self.selected_product_id
         try:
-            result = database.update_product(product_id, *values)
+            result = database.update_product(product_id, *values, user_id=self.user.user_id)
         except sqlite3.DatabaseError:
             self.database_problem("update the product")
             return
@@ -1215,12 +1273,9 @@ def main():
         root.title(f"Sign In - {WINDOW_TITLE}")
         AuthScreen(root, on_success=show_inventory, mode="sign_in" if database.count_users() else "sign_up")
 
-    def show_inventory(user, new_account=False):
+    def show_inventory(user):
         app = InventoryApp(root, user, on_sign_out=show_sign_in)
-        if new_account:
-            app.show_toast(f"Account created. Welcome, {user.full_name}!")
-        else:
-            app.show_toast(f"Signed in as {user.full_name}.", "info")
+        app.show_toast(f"Signed in as {user.full_name}.", "info")
 
     show_sign_in()
     root.mainloop()

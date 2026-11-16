@@ -112,8 +112,7 @@ def validate_password(password):
     return password
 
 
-def validate_sign_up(full_name, username, password, confirm_password):
-    """Check the Create Account form. Returns (full_name, username, password) or raises ValidationError."""
+def validate_full_name(full_name):
     full_name = clean_text(full_name)
     if not full_name:
         raise ValidationError("Please enter your full name.", "full_name")
@@ -121,7 +120,12 @@ def validate_sign_up(full_name, username, password, confirm_password):
         raise ValidationError("Full name is too short.", "full_name")
     if len(full_name) > MAX_FULL_NAME_LENGTH:
         raise ValidationError(f"Full name must be {MAX_FULL_NAME_LENGTH} characters or less.", "full_name")
+    return full_name
 
+
+def validate_sign_up(full_name, username, password, confirm_password):
+    """Check the Create Account form. Returns (full_name, username, password) or raises ValidationError."""
+    full_name = validate_full_name(full_name)
     username = validate_username(username)
     password = validate_password(password)
     if password.lower() == username.lower():

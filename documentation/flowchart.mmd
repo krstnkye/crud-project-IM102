@@ -1,24 +1,32 @@
 flowchart TD
     A([Start]) --> B["Open the app (run main.py)"]
     B --> C["Load inventory.db (make the tables if missing)"]
-    C --> SI["Sign in, or create an account<br/>(password is saved only as a salted hash)"]
-    SI --> V{"Details valid and<br/>password correct?"}
+    C --> SI["Sign In screen"]
+    SI -->|New user| CA["Create Account: full name,<br/>username, password two times"]
+    CA --> CV{"Valid and<br/>username free?"}
+    CV -->|No| CE[Show red error message]
+    CE --> T1(["Back to Create Account"])
+    CV -->|Yes| CS["Save the user with a salted password hash,<br/>show Account created"]
+    CS --> T2(["Back to Sign In"])
+    SI -->|Sign in| V{"Username and<br/>password correct?"}
     V -->|No| VE["Show red error message<br/>(pause after 5 wrong tries)"]
-    VE --> SI
+    VE --> T3(["Back to Sign In"])
     V -->|Yes| D["Main screen: product table, summary cards,<br/>and saved activity log"]
     D --> E{Choose an action}
     E -->|Add| F[Type the product details]
     E -->|Update| G[Click a product and change details]
     E -->|Delete| X[Click a product]
+    E -->|My Profile| PR["Profile page: my details, my activity, team,<br/>edit name, change password"]
     E -->|Sign out| SO(["Back to Sign In"])
     E -->|Exit| Z([End])
     F --> I{Is the input valid?}
     G --> I
     I -->|No| J[Show red error message in form]
-    I -->|Yes| K["Save the change to inventory.db<br/>and record who did it"]
+    I -->|Yes| K["Save the change to inventory.db<br/>with who did it and when"]
     X --> Q{Confirm delete?}
     Q -->|Yes| K
     Q -->|No| R2(["Back to main screen"])
     K --> N["Refresh the table and cards,<br/>show success message"]
     J --> R1(["Back to main screen"])
     N --> R3(["Back to main screen"])
+    PR --> R4(["Back to main screen"])

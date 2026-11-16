@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 
 import database
-from validation import ValidationError, validate_sign_in, validate_sign_up
+from validation import ValidationError, validate_full_name, validate_password, validate_sign_in, validate_sign_up
 
 
 ALGORITHM = "pbkdf2_sha256"
@@ -66,12 +66,14 @@ _DUMMY_HASH = hash_password(secrets.token_hex(16))
 
 
 def sign_up(full_name, username, password, confirm_password):
-    """Create a new account. Returns the new User, or raises ValidationError."""
+    """Create a new account. Returns the new User, or raises ValidationError.
+
+    This does not sign the user in. They sign in afterwards with the username and password they chose.
+    """
     full_name, username, password = validate_sign_up(full_name, username, password, confirm_password)
     user_id = database.create_user(username, full_name, hash_password(password))
     if user_id is None:
         raise ValidationError("That username is already taken. Please choose another one.", "username")
-    database.record_login(user_id)
     database.add_activity(user_id, "SIGN UP", f"Account created for {full_name}.")
     return User(user_id, username, full_name)
 
@@ -116,6 +118,37 @@ def sign_in(username, password):
     database.record_login(user.user_id)
     database.add_activity(user.user_id, "SIGN IN", f"{user.full_name} signed in.")
     return user
+
+
+def change_full_name(user, full_name):
+    """Save a new display name. Returns the updated User, or raises ValidationError."""
+    full_name = validate_full_name(full_name)
+    if full_name == user.full_name:
+        raise ValidationError("That is already your name.", "full_name")
+    database.update_full_name(user.user_id, full_name)
+    database.add_activity(user.user_id, "PROFILE", f"Changed name from {user.full_name} to {full_name}.")
+    return User(user.user_id, user.username, full_name, user.last_login)
+
+
+def change_password(user, current_password, new_password, confirm_password):
+    """Change a password after checking the current one. Raises ValidationError if anything is wrong."""
+    if not current_password:
+        raise ValidationError("Please enter your current password.", "current")
+    row = database.get_user_by_id(user.user_id)
+    if row is None or not verify_password(current_password, row["password_hash"]):
+        raise ValidationError("Your current password is not correct.", "current")
+    try:
+        validate_password(new_password)
+    except ValidationError as error:
+        raise ValidationError(error.message, "new") from None
+    if new_password.lower() == user.username.lower():
+        raise ValidationError("Password cannot be the same as the username.", "new")
+    if new_password == current_password:
+        raise ValidationError("The new password must be different from the current one.", "new")
+    if confirm_password != new_password:
+        raise ValidationError("The two new passwords do not match.", "confirm")
+    database.set_password_hash(user.user_id, hash_password(new_password))
+    database.add_activity(user.user_id, "PASSWORD", f"{user.full_name} changed their password.")
 
 
 def sign_out(user):
