@@ -218,3 +218,28 @@ def admin_reset_password(admin, user_id):
 
 def sign_out(user):
     database.add_activity(user.user_id, "SIGN OUT", f"{user.full_name} signed out.")
+
+
+MAX_PHOTO_BYTES = 2 * 1024 * 1024  # 2 MB
+PHOTO_TYPES = {b"\x89PNG\r\n\x1a\n": "PNG", b"GIF87a": "GIF", b"GIF89a": "GIF"}
+
+
+def change_photo(user, file_path):
+    """Save a PNG or GIF picture (up to 2 MB) as the user's profile photo."""
+    try:
+        with open(file_path, "rb") as file:
+            data = file.read(MAX_PHOTO_BYTES + 1)
+    except OSError:
+        raise ValidationError("That picture could not be opened. Please choose another one.")
+    if not any(data.startswith(start) for start in PHOTO_TYPES):
+        raise ValidationError("Please choose a PNG or GIF picture.")
+    if len(data) > MAX_PHOTO_BYTES:
+        raise ValidationError("That picture is too big. Please choose one under 2 MB.")
+    database.set_photo(user.user_id, data)
+    database.add_activity(user.user_id, "PROFILE", "Changed profile photo.")
+
+
+def remove_photo(user):
+    """Remove the user's profile photo, so their initials show again."""
+    database.set_photo(user.user_id, None)
+    database.add_activity(user.user_id, "PROFILE", "Removed profile photo.")

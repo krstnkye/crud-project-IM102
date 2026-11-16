@@ -10,7 +10,7 @@ import database
 import theme
 from auth_screen import AuthScreen
 from admin_page import AdminPage
-from profile_page import ProfilePage, nice_time, role_badge
+from profile_page import ProfilePage, draw_avatar, nice_time, role_badge
 from theme import COLORS, FlatButton
 from validation import ValidationError, parse_price, parse_quantity, validate_product
 
@@ -115,7 +115,7 @@ class InventoryApp:
         self.low_stock_unit_var = tk.StringVar(value=f"below {database.LOW_STOCK_THRESHOLD} pcs")
         self.out_stock_var = tk.StringVar(value="0")
         self.out_stock_detail_var = tk.StringVar(value="Nothing is out of stock")
-        self.out_stock_unit_var = tk.StringVar(value="need restock")
+        self.out_stock_unit_var = tk.StringVar(value="add stock")
         self.sidebar_records_var = tk.StringVar()
         self.health_var = tk.StringVar(value="0%")
         self.footer_var = tk.StringVar()
@@ -140,7 +140,7 @@ class InventoryApp:
         self.log("START", f"Welcome, {user.full_name}. {len(self.products)} product(s) loaded from inventory.db.")
         low = [p for p in self.products if p["quantity"] < database.LOW_STOCK_THRESHOLD]
         if low:
-            self.log("ALERT", f"{len(low)} product(s) below {database.LOW_STOCK_THRESHOLD} pieces. Restock suggested.")
+            self.log("ALERT", f"{len(low)} product(s) below {database.LOW_STOCK_THRESHOLD} pieces. Please add stock.")
 
     # ------------------------------------------------------------------ layout
 
@@ -261,7 +261,7 @@ class InventoryApp:
         self.health_bar.bind("<Configure>", lambda event: self.draw_health())
         row = tk.Frame(bottom, bg=COLORS["sidebar"])
         row.pack(fill=tk.X, pady=(8, 0))
-        self.caps(row, f"Python {sys.version_info.major}.{sys.version_info.minor} · Tkinter", bg=COLORS["sidebar"], weight="normal").pack(side=tk.LEFT)
+        self.caps(row, "Product Inventory System", bg=COLORS["sidebar"], weight="normal").pack(side=tk.LEFT)
 
     def build_user_card(self, parent):
         """Who is signed in, with a Sign Out button."""
@@ -272,8 +272,11 @@ class InventoryApp:
         row.pack(fill=tk.X)
         avatar = tk.Canvas(row, width=34, height=34, bg=COLORS["card"], highlightthickness=0)
         avatar.pack(side=tk.LEFT)
-        avatar.create_oval(1, 1, 33, 33, fill=COLORS["primary_soft"], outline=COLORS["primary_line"])
-        avatar.create_text(17, 17, text=self.user.initials, fill=COLORS["primary"], font=sans(10, "bold"))
+        try:
+            photo = database.get_photo(self.user.user_id)
+        except sqlite3.DatabaseError:
+            photo = None
+        draw_avatar(avatar, 34, self.user.full_name, photo)
         names = tk.Frame(row, bg=COLORS["card"])
         names.pack(side=tk.LEFT, padx=(8, 0), fill=tk.X, expand=True)
         full_name = self.user.full_name if len(self.user.full_name) <= 18 else self.user.full_name[:17] + "…"
@@ -354,12 +357,12 @@ class InventoryApp:
         if "Admin Dashboard" in self.nav_widgets:
             self.paint_nav("Admin Dashboard", page == "admin" or (page == "profile" and user_id is not None))
 
-    def on_profile_changed(self):
-        """The user's name changed: update the window title, side menu, and header."""
+    def on_profile_changed(self, message="Your name was saved."):
+        """The user's name or photo changed: update the window title, side menu, and header."""
         self.root.title(f"{WINDOW_TITLE} - {self.user.full_name}")
         def redraw():
             self.rebuild_screen()
-            self.show_toast("Your name was saved.")
+            self.show_toast(message)
         self.root.after_idle(redraw)
 
     def draw_health(self):
@@ -432,7 +435,7 @@ class InventoryApp:
             ("Total Products", "▦", "primary", self.total_products_var, self.total_units_var, "● Saved in inventory.db", "primary"),
             ("Low Stock", "▲", "amber", self.low_stock_var, self.low_stock_unit_var, self.low_stock_detail_var, "amber"),
             ("Out of Stock", "⊘", "red", self.out_stock_var, self.out_stock_unit_var, self.out_stock_detail_var, "red"),
-            ("Database File", "⛁", "primary", self.db_size_var, None, f"3 tables · SQLite v{sqlite3.sqlite_version}", "muted"),
+            ("Database File", "⛁", "primary", self.db_size_var, None, "3 tables: products, users, activity", "muted"),
         ]
 
         for index, (label, icon, color, value, extra, note, note_color) in enumerate(cards):
@@ -825,7 +828,7 @@ class InventoryApp:
         if self.log_box.index("end-1c") != "1.0":
             self.log_box.insert(tk.END, "\n")
         self.log_box.insert(tk.END, f"{time_text} ", "time")
-        self.log_box.insert(tk.END, f"[{kind}]", LOG_COLORS.get(kind, "muted"))
+        self.log_box.insert(tk.END, f"[{database.action_label(kind)}]", LOG_COLORS.get(kind, "muted"))
         self.log_box.insert(tk.END, f" {message}")
         if who:
             self.log_box.insert(tk.END, f"  · @{who}", "time")
@@ -1175,7 +1178,7 @@ class InventoryApp:
         self.low_stock_detail_var.set(short_list(low) if low else "All stock levels are OK")
         self.out_stock_var.set(f"{len(out)}")
         self.out_stock_detail_var.set(short_list(out) if out else "Nothing is out of stock")
-        self.out_stock_unit_var.set("need restock" if out else "")
+        self.out_stock_unit_var.set("add stock" if out else "")
 
         count = len(self.products)
         in_stock = count - len(low)

@@ -6,7 +6,20 @@ import auth
 import database
 import theme
 from theme import COLORS, FlatButton
-from validation import MIN_PASSWORD_LENGTH, ValidationError
+from validation import MIN_PASSWORD_LENGTH, ValidationError, validate_username
+
+
+# Shown under an earlier box that is still empty when the user moves on to a later box.
+FILL_FIRST = {
+    "full_name": "Please enter your full name first.",
+    "username": "Please enter your username first.",
+    "password": "Please enter your password first.",
+}
+
+
+def border(color):
+    """Border color for an input box, used whether or not the cursor is inside it."""
+    return {"highlightbackground": color, "highlightcolor": color}
 
 
 def sans(size, weight="normal"):
@@ -15,7 +28,7 @@ def sans(size, weight="normal"):
 
 FEATURES = (
     ("▦", "Track every product", "Add, search, update, and delete items in one screen."),
-    ("▲", "Catch low stock early", "Low and out of stock items are flagged right away."),
+    ("▲", "Catch low stock early", "Low and out of stock items are shown right away."),
     ("⛁", "Every change is recorded", "Each change is saved with the name of the user who made it."),
 )
 
@@ -32,6 +45,10 @@ class AuthScreen:
         self.error_var = tk.StringVar()
         self.message_kind = "error"  # "error" (red) or "success" (green) for the message under the form
         self.entries = {}
+        self.reached = -1
+        # Check the Create Account form while the user types.
+        for name in ("full_name", "username", "password", "confirm"):
+            self.vars[name].trace_add("write", lambda *args, n=name: self.reach(n))
 
         self.root.title("Sign In - Product Inventory System")
         self.build()
@@ -66,7 +83,7 @@ class AuthScreen:
         ).pack(anchor=tk.W)
         tk.Label(
             inner,
-            text="Keep your stock organized, see what needs restocking, and know who changed what.",
+            text="Keep your stock organized, see what is running low, and know who changed what.",
             bg=COLORS["sidebar"], fg=COLORS["muted"], font=sans(10), justify=tk.LEFT, wraplength=360,
         ).pack(anchor=tk.W, pady=(10, 26))
 
@@ -108,7 +125,7 @@ class AuthScreen:
         self.build_fields()
 
         tk.Label(
-            holder, text="Passwords are stored as salted PBKDF2-SHA256 hashes, never as plain text.",
+            holder, text="Passwords are kept secret and are never saved as plain text.",
             bg=COLORS["page"], fg=COLORS["faint"], font=sans(8),
         ).pack(pady=(12, 0))
 
@@ -131,6 +148,7 @@ class AuthScreen:
         for widget in self.form_area.winfo_children():
             widget.destroy()
         self.entries = {}
+        self.reached = -1
         area = self.form_area
         signing_up = self.mode == "sign_up"
 
@@ -149,7 +167,7 @@ class AuthScreen:
             self.add_field("full_name", "Full Name")
         self.add_field("username", "Username", hint="3-20 letters, numbers, . or _" if signing_up else None)
         self.add_field("password", "Password", secret=True,
-                       hint=f"{MIN_PASSWORD_LENGTH}+ characters, a letter and a number" if signing_up else None)
+                       hint=f"{MIN_PASSWORD_LENGTH} or more, with a letter and a number" if signing_up else None)
         if signing_up:
             self.add_field("confirm", "Confirm Password", secret=True)
 
@@ -192,6 +210,7 @@ class AuthScreen:
         if self.mode == "sign_in" and self.vars["username"].get():
             first = "password"
         self.root.after_idle(lambda: self.entries[first].winfo_exists() and self.entries[first].focus_set())
+        self.live_check()
 
     def add_field(self, name, label, secret=False, hint=None):
         wrapper = tk.Frame(self.form_area, bg=COLORS["card"])
@@ -201,7 +220,7 @@ class AuthScreen:
         tk.Label(top, text=label, bg=COLORS["card"], fg=COLORS["dim"], font=sans(8, "bold")).pack(side=tk.LEFT)
         if hint:
             tk.Label(top, text=hint, bg=COLORS["card"], fg=COLORS["faint"], font=sans(8)).pack(side=tk.RIGHT)
-        box = tk.Frame(wrapper, bg=COLORS["input"], highlightthickness=1, highlightbackground=COLORS["line_high"])
+        box = tk.Frame(wrapper, bg=COLORS["input"], highlightthickness=1, **border(COLORS["line_high"]))
         box.pack(fill=tk.X, pady=(4, 0))
         entry = tk.Entry(
             box, textvariable=self.vars[name], width=36, bg=COLORS["input"], fg=COLORS["text"],
@@ -211,14 +230,104 @@ class AuthScreen:
         entry.pack(fill=tk.X, ipady=7, padx=10)
         entry.secret = secret
         entry.box = box
-        entry.bind("<FocusIn>", lambda e: box.configure(highlightbackground=COLORS["primary"]), add="+")
-        entry.bind("<FocusOut>", lambda e: box.configure(highlightbackground=COLORS["line_high"]), add="+")
+        entry.has_problem = False  # True while a red message is shown under this box
+        # A small message under the box, shown while typing (for example "Passwords do not match").
+        entry.note = tk.Label(wrapper, bg=COLORS["card"], font=sans(8, "bold"), anchor=tk.W, justify=tk.LEFT, wraplength=320)
+        entry.bind("<FocusIn>", lambda e: box.configure(**border(COLORS["red"] if entry.has_problem else COLORS["primary"])), add="+")
+        entry.bind("<FocusOut>", lambda e: box.configure(**border(COLORS["red"] if entry.has_problem else COLORS["line_high"])), add="+")
         entry.bind("<Return>", lambda event: self.submit())
         entry.bind("<KeyRelease>", self.check_caps_lock, add="+")
         entry.bind("<Key>", lambda event: self.message_kind == "error" and self.error_var.get() and self.clear_error(), add="+")
+        entry.bind("<FocusIn>", lambda e, n=name: self.reach(n), add="+")
         self.entries[name] = entry
 
     # ---------------------------------------------------------------- behavior
+
+    def set_note(self, name, text="", ok=False):
+        """Show (or hide, when text is empty) the small message under one box."""
+        entry = self.entries.get(name)
+        if entry is None or not entry.winfo_exists():
+            return
+        entry.has_problem = bool(text) and not ok
+        if not text or ok:
+            entry.box.configure(**border(COLORS["primary"] if entry.focus_get() == entry else COLORS["line_high"]))
+        if not text:
+            entry.note.pack_forget()
+            return
+        entry.note.configure(text=("✓  " if ok else "⚠  ") + text, fg=COLORS["green"] if ok else COLORS["red"])
+        entry.note.pack(fill=tk.X, pady=(4, 0))
+        if not ok:
+            entry.box.configure(**border(COLORS["red"]))
+
+    def reach(self, name):
+        """The user clicked into or typed in this box: earlier empty boxes may now need a warning."""
+        names = list(self.entries)
+        if name in names:
+            self.reached = max(self.reached, names.index(name))
+        self.live_check()
+
+    def live_check(self):
+        """Say right away what is wrong while the user types.
+
+        On both tabs: when the user moves on to a later box, every earlier box that is still empty
+        says it must be filled in first. On Create Account: also say if the username is taken and
+        if the two passwords match.
+        """
+        if "username" not in self.entries:
+            return
+        signing_up = self.mode == "sign_up"
+        names = list(self.entries)
+        focused = self.root.focus_get()
+        # Warn about boxes before the one the cursor is in (or before the furthest box reached).
+        current = next((i for i, n in enumerate(names) if self.entries[n] is focused), self.reached)
+
+        def needs_filling(name):
+            if name not in FILL_FIRST or name not in self.entries:
+                return False
+            value = self.vars[name].get()
+            empty = not (value if name in ("password", "confirm") else value.strip())
+            return empty and names.index(name) < current
+
+        for name in ("full_name", "password"):
+            if name in self.entries:
+                if needs_filling(name):
+                    self.set_note(name, FILL_FIRST[name])
+                else:
+                    self.set_note(name)
+
+        username = self.vars["username"].get().strip()
+        if needs_filling("username"):
+            self.set_note("username", FILL_FIRST["username"])
+        elif not username or not signing_up:
+            self.set_note("username")
+        if not signing_up or "confirm" not in self.entries or not username:
+            if signing_up and "confirm" in self.entries:
+                self.check_confirm()
+            return
+
+        try:
+            validate_username(username)
+            taken = database.get_user_by_username(username) is not None
+        except (ValidationError, Exception):
+            taken = None  # not a full username yet, or the database could not be read
+        if taken is None:
+            self.set_note("username")
+        elif taken:
+            self.set_note("username", "This username is already taken.")
+        else:
+            self.set_note("username", "This username is available.", ok=True)
+
+        self.check_confirm()
+
+    def check_confirm(self):
+        password = self.vars["password"].get()
+        confirm = self.vars["confirm"].get()
+        if not confirm or not password:
+            self.set_note("confirm")
+        elif confirm != password:
+            self.set_note("confirm", "Passwords do not match.")
+        else:
+            self.set_note("confirm", "Passwords match.", ok=True)
 
     def show_or_hide_error(self):
         if not self.error_label.winfo_exists():
@@ -238,10 +347,10 @@ class AuthScreen:
         self.show_or_hide_error()
         entry = self.entries.get(field)
         if entry is not None:
-            entry.box.configure(highlightbackground=COLORS["red"])
+            entry.box.configure(**border(COLORS["red"]))
             entry.focus_set()
             entry.select_range(0, tk.END)
-            entry.bind("<FocusOut>", lambda e, b=entry.box: b.configure(highlightbackground=COLORS["line_high"]), add="")
+            entry.bind("<FocusOut>", lambda e, b=entry.box: b.configure(**border(COLORS["line_high"])), add="")
 
     def clear_error(self):
         self.error_var.set("")

@@ -6,10 +6,11 @@
   controls for the admin (role, activate/deactivate, reset password).
 """
 
+import base64
 import sqlite3
 import tkinter as tk
 from datetime import datetime
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 import auth
 import database
@@ -42,6 +43,32 @@ def short_time(text, empty="Never"):
     except ValueError:
         return text
     return moment.strftime("%b %d %I:%M %p").replace(" 0", " ")
+
+
+def photo_image(data, size):
+    """Turn saved photo bytes into a picture about `size` pixels wide, or None if it cannot be shown."""
+    if not data:
+        return None
+    try:
+        image = tk.PhotoImage(data=base64.b64encode(data).decode("ascii"))
+    except (tk.TclError, ValueError):
+        return None
+    step = max(1, -(-max(image.width(), image.height()) // size))  # round up
+    return image.subsample(step, step) if step > 1 else image
+
+
+def draw_avatar(canvas, size, full_name, data=None):
+    """Show the profile photo in the circle, or the person's initials when there is no photo."""
+    canvas.delete("all")
+    canvas.image = photo_image(data, size - 4)
+    if canvas.image is not None:
+        canvas.create_image(size // 2, size // 2, image=canvas.image)
+        half_w, half_h = canvas.image.width() // 2 + 1, canvas.image.height() // 2 + 1
+        canvas.create_rectangle(size // 2 - half_w, size // 2 - half_h, size // 2 + half_w, size // 2 + half_h,
+                                outline=COLORS["primary_line"], width=2)
+        return
+    canvas.create_oval(2, 2, size - 2, size - 2, fill=COLORS["primary_soft"], outline=COLORS["primary_line"], width=2)
+    canvas.create_text(size // 2, size // 2, text=initials(full_name), fill=COLORS["primary"], font=sans(max(8, size // 4), "bold"))
 
 
 def initials(full_name):
@@ -190,7 +217,7 @@ class ProfilePage:
             back.bind("<Button-1>", lambda event: self.app.show_page("admin"))
         row = tk.Frame(card, bg=COLORS["card"])
         row.pack(fill=tk.X)
-        self.avatar = tk.Canvas(row, width=58, height=58, bg=COLORS["card"], highlightthickness=0)
+        self.avatar = tk.Canvas(row, width=64, height=64, bg=COLORS["card"], highlightthickness=0)
         self.avatar.pack(side=tk.LEFT)
         names = tk.Frame(row, bg=COLORS["card"])
         names.pack(side=tk.LEFT, padx=(12, 0), fill=tk.X, expand=True)
@@ -219,6 +246,20 @@ class ProfilePage:
         outer.pack(fill=tk.BOTH, expand=True, pady=(14, 0))
 
         caps(card, "Edit Profile", color=COLORS["primary"], size=9).pack(anchor=tk.W)
+        photo_row = tk.Frame(card, bg=COLORS["card"])
+        photo_row.pack(fill=tk.X, pady=(8, 0))
+        FlatButton(
+            photo_row, "Change Photo", self.change_photo, COLORS["card_high"], COLORS["strong"], COLORS["card_top"],
+            font_size=8, pady=6, border=COLORS["line_high"],
+        ).pack(fill=tk.X)
+        self.remove_photo_button = FlatButton(
+            photo_row, "Remove Photo", self.remove_photo, COLORS["card"], COLORS["red"], COLORS["red_soft"],
+            font_size=8, pady=6, border=COLORS["red_line"],
+        )
+        tk.Label(
+            card, text="PNG or GIF picture, under 2 MB.", bg=COLORS["card"], fg=COLORS["faint"], font=sans(7),
+        ).pack(anchor=tk.W, pady=(3, 0))
+        self.photo_note = self.message_label(card)
         self.name_entry = self.field(card, "Full Name", self.name_var)
         self.name_note = self.message_label(card)
         FlatButton(
@@ -230,7 +271,7 @@ class ProfilePage:
         caps(card, "Change Password", color=COLORS["primary"], size=9).pack(anchor=tk.W)
         self.password_entries = {
             "current": self.field(card, "Current Password", self.password_vars["current"], secret=True),
-            "new": self.field(card, "New Password", self.password_vars["new"], secret=True, hint="8+ chars, a letter and a number"),
+            "new": self.field(card, "New Password", self.password_vars["new"], secret=True, hint="8 or more characters, a letter and a number"),
             "confirm": self.field(card, "Confirm New Password", self.password_vars["confirm"], secret=True),
         }
         self.password_note = self.message_label(card)
@@ -308,9 +349,16 @@ class ProfilePage:
         row = self.row
         full_name = row["full_name"]
 
-        self.avatar.delete("all")
-        self.avatar.create_oval(2, 2, 56, 56, fill=COLORS["primary_soft"], outline=COLORS["primary_line"], width=2)
-        self.avatar.create_text(29, 29, text=initials(full_name), fill=COLORS["primary"], font=sans(16, "bold"))
+        try:
+            photo = database.get_photo(self.user_id)
+        except sqlite3.DatabaseError:
+            photo = None
+        draw_avatar(self.avatar, 64, full_name, photo)
+        if self.is_self:
+            if photo:
+                self.remove_photo_button.pack(fill=tk.X, pady=(6, 0))
+            else:
+                self.remove_photo_button.pack_forget()
         self.full_name_label.configure(text=full_name if len(full_name) <= 24 else full_name[:23] + "…")
         self.username_label.configure(text=f"@{row['username']}")
         for widget in self.badge_holder.winfo_children():
@@ -333,7 +381,7 @@ class ProfilePage:
         self.history.delete(*self.history.get_children())
         for index, entry in enumerate(history):
             self.history.insert(
-                "", tk.END, values=(nice_time(entry["created_at"]), entry["action"], entry["details"]),
+                "", tk.END, values=(nice_time(entry["created_at"]), database.action_label(entry["action"]), entry["details"]),
                 tags=("even" if index % 2 == 0 else "odd", ACTION_COLORS.get(entry["action"], "plain")),
             )
         self.history_count.configure(text=f"{len(history)} saved action{'s' if len(history) != 1 else ''}")
@@ -357,6 +405,35 @@ class ProfilePage:
             self.app.database_problem("save your name")
             return
         self.app.on_profile_changed()
+
+    def change_photo(self):
+        self.set_message(self.photo_note, "")
+        path = filedialog.askopenfilename(
+            parent=self.frame.winfo_toplevel(), title="Choose a profile photo",
+            filetypes=[("PNG or GIF picture", "*.png *.gif"), ("PNG picture", "*.png"), ("GIF picture", "*.gif")],
+        )
+        if not path:
+            return
+        try:
+            auth.change_photo(self.app.user, path)
+        except ValidationError as error:
+            self.set_message(self.photo_note, error.message)
+            return
+        except sqlite3.DatabaseError:
+            self.app.database_problem("save your photo")
+            return
+        self.app.on_profile_changed("Your photo was saved.")
+
+    def remove_photo(self):
+        self.set_message(self.photo_note, "")
+        if not messagebox.askyesno("Remove Photo", "Remove your profile photo?", parent=self.frame.winfo_toplevel()):
+            return
+        try:
+            auth.remove_photo(self.app.user)
+        except sqlite3.DatabaseError:
+            self.app.database_problem("remove your photo")
+            return
+        self.app.on_profile_changed("Your photo was removed.")
 
     def save_password(self):
         self.set_message(self.password_note, "")

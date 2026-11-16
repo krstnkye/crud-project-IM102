@@ -85,9 +85,10 @@ How passwords are kept safe: each password is mixed with a random 16-byte salt a
 Click **My Dashboard** in the side menu, or click your name at the bottom of it. It shows:
 
 - Your name, username, role, user ID, when you joined, and when you last signed in
-- How many products you added, updated or restocked, and deleted
+- How many products you added, updated or added stock to, and deleted
 - Your own saved activity, newest first
 - **Edit Profile** to change your full name, and **Change Password** (you must type your current password first)
+- **Change Photo** to add or change your profile photo (a PNG or GIF picture under 2 MB, saved inside `inventory.db`), and **Remove Photo** to go back to your initials
 
 ## Admin Dashboard (admins only)
 
