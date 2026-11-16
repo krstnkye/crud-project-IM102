@@ -73,6 +73,7 @@ The first time the app runs there are no accounts yet, so it opens on **Create A
 - **Username:** 3 to 20 letters, numbers, dots, or underscores. It must not be used by another account (capital letters do not matter, so `Juan` and `juan` are the same).
 - **Password:** at least 8 characters with at least one letter and one number, cannot be the same as the username, and must be typed twice the same way.
 - **Show password** shows what you typed, and a warning appears when Caps Lock is on.
+- While you type on **Create Account**, the screen tells you right away if the username is already taken and if the two passwords do not match (in red), or that they are fine (in green).
 - After 5 wrong passwords in a row, sign in for that username is paused for 30 seconds.
 - After **Create Account**, the app does not sign you in. It goes back to the Sign In screen with your new username filled in, and you sign in with the username and password you just made.
 - An inactive account (deactivated by an admin) cannot sign in until an admin activates it again.

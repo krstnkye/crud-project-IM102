@@ -1,12 +1,13 @@
 """The Sign In and Create Account screen shown before the inventory opens."""
 
+import sqlite3
 import tkinter as tk
 
 import auth
 import database
 import theme
 from theme import COLORS, FlatButton
-from validation import MIN_PASSWORD_LENGTH, ValidationError
+from validation import MIN_PASSWORD_LENGTH, ValidationError, validate_username
 
 
 def sans(size, weight="normal"):
@@ -32,6 +33,8 @@ class AuthScreen:
         self.error_var = tk.StringVar()
         self.message_kind = "error"  # "error" (red) or "success" (green) for the message under the form
         self.entries = {}
+        for name in ("username", "password", "confirm"):
+            self.vars[name].trace_add("write", lambda *args: self.check_as_you_type())
 
         self.root.title("Sign In - Product Inventory System")
         self.build()
@@ -188,6 +191,7 @@ class AuthScreen:
         link.pack(side=tk.LEFT, padx=(4, 0))
         link.bind("<Button-1>", lambda event: self.switch_mode("sign_in" if signing_up else "sign_up"))
 
+        self.check_as_you_type()
         first = "full_name" if signing_up else "username"
         if self.mode == "sign_in" and self.vars["username"].get():
             first = "password"
@@ -199,8 +203,9 @@ class AuthScreen:
         top = tk.Frame(wrapper, bg=COLORS["card"])
         top.pack(fill=tk.X)
         tk.Label(top, text=label, bg=COLORS["card"], fg=COLORS["dim"], font=sans(8, "bold")).pack(side=tk.LEFT)
-        if hint:
-            tk.Label(top, text=hint, bg=COLORS["card"], fg=COLORS["faint"], font=sans(8)).pack(side=tk.RIGHT)
+        # The right side of the label row shows the hint, or a live message like "Passwords do not match".
+        note = tk.Label(top, text=hint or "", bg=COLORS["card"], fg=COLORS["faint"], font=sans(8))
+        note.pack(side=tk.RIGHT)
         box = tk.Frame(wrapper, bg=COLORS["input"], highlightthickness=1, highlightbackground=COLORS["line_high"])
         box.pack(fill=tk.X, pady=(4, 0))
         entry = tk.Entry(
@@ -211,12 +216,56 @@ class AuthScreen:
         entry.pack(fill=tk.X, ipady=7, padx=10)
         entry.secret = secret
         entry.box = box
+        entry.note = note
+        entry.hint = hint or ""
+        entry.problem = False
         entry.bind("<FocusIn>", lambda e: box.configure(highlightbackground=COLORS["primary"]), add="+")
-        entry.bind("<FocusOut>", lambda e: box.configure(highlightbackground=COLORS["line_high"]), add="+")
+        entry.bind("<FocusOut>", lambda e, en=entry: box.configure(highlightbackground=COLORS["red"] if en.problem else COLORS["line_high"]), add="+")
         entry.bind("<Return>", lambda event: self.submit())
         entry.bind("<KeyRelease>", self.check_caps_lock, add="+")
         entry.bind("<Key>", lambda event: self.message_kind == "error" and self.error_var.get() and self.clear_error(), add="+")
         self.entries[name] = entry
+
+    def set_note(self, name, text=None, kind=None):
+        """Show a live message next to a box label: kind "error" (red), "ok" (green), or None for the normal hint."""
+        entry = self.entries.get(name)
+        if entry is None or not entry.winfo_exists():
+            return
+        if kind is None:
+            entry.note.configure(text=entry.hint, fg=COLORS["faint"], font=sans(8))
+        else:
+            entry.note.configure(text=text, fg=COLORS["red"] if kind == "error" else COLORS["green"], font=sans(8, "bold"))
+        entry.problem = kind == "error"
+        if entry.focus_get() is not entry:
+            entry.box.configure(highlightbackground=COLORS["red"] if entry.problem else COLORS["line_high"])
+
+    def check_as_you_type(self):
+        """On Create Account, say right away if the username is taken or the two passwords do not match."""
+        if self.mode != "sign_up" or "confirm" not in self.entries:
+            return
+
+        username = self.vars["username"].get()
+        try:
+            validate_username(username)
+        except ValidationError:
+            self.set_note("username")  # Not finished yet: keep the normal hint. Wrong format is shown on Create Account.
+        else:
+            try:
+                taken = database.get_user_by_username(username) is not None
+            except sqlite3.DatabaseError:
+                taken = False
+            if taken:
+                self.set_note("username", "✗  Username is already taken", "error")
+            else:
+                self.set_note("username", "✓  Username is available", "ok")
+
+        password, confirm = self.vars["password"].get(), self.vars["confirm"].get()
+        if not confirm:
+            self.set_note("confirm")
+        elif confirm != password:
+            self.set_note("confirm", "✗  Passwords do not match", "error")
+        else:
+            self.set_note("confirm", "✓  Passwords match", "ok")
 
     # ---------------------------------------------------------------- behavior
 
@@ -241,7 +290,7 @@ class AuthScreen:
             entry.box.configure(highlightbackground=COLORS["red"])
             entry.focus_set()
             entry.select_range(0, tk.END)
-            entry.bind("<FocusOut>", lambda e, b=entry.box: b.configure(highlightbackground=COLORS["line_high"]), add="")
+            entry.bind("<FocusOut>", lambda e, en=entry: en.box.configure(highlightbackground=COLORS["red"] if en.problem else COLORS["line_high"]), add="")
 
     def clear_error(self):
         self.error_var.set("")
