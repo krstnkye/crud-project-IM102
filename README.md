@@ -118,6 +118,14 @@ Every one of these actions is saved in the activity log with the admin's name. *
 
 ## How To Run
 
+To get the project on another laptop, download it from GitHub first. Either click **Code → Download ZIP** on https://github.com/krstnkye/crud-project-IM102 and unzip it, or run:
+
+```bash
+git clone https://github.com/krstnkye/crud-project-IM102.git
+```
+
+Each laptop starts with an empty `inventory.db`. The first account made on that laptop becomes the Admin.
+
 1. Open the `crud-project-IM102` folder in VS Code or IDLE.
 2. Open a terminal in that folder.
 3. Run:
