@@ -439,7 +439,9 @@ class ProfilePage:
         self.set_message(self.password_note, "")
         values = {name: var.get() for name, var in self.password_vars.items()}
         try:
-            auth.change_password(self.app.user, values["current"], values["new"], values["confirm"])
+            self.app.user = auth.change_password(
+                self.app.user, values["current"], values["new"], values["confirm"]
+            )
         except ValidationError as error:
             self.set_message(self.password_note, error.message)
             entry = self.password_entries.get(error.field)

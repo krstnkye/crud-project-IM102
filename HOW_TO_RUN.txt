@@ -25,9 +25,10 @@ Run the app
 
 First time
 ----------
-- The app starts on "Create Account". The FIRST account you make on a
-  laptop becomes the Admin. Every account made after that is Staff.
-- After creating the account, sign in with the same username and password.
+- The app starts on "Initial Admin Setup". This creates the first Admin.
+- After setup, sign in through Admin Login.
+- Other people use Request Account. They cannot sign in until an Admin opens
+  the Admin Dashboard and approves the request as Staff or Admin.
 - Your products and accounts are saved in a file called inventory.db that
   the app creates in this folder. Each laptop has its own inventory.db.
 
@@ -35,7 +36,16 @@ Check that everything works (optional)
 --------------------------------------
     python -m unittest test_database.py
 
-It should end with "OK" (35 tests).
+It should end with "OK" (41 tests).
+
+Security notes
+--------------
+- Five wrong sign-in attempts create a saved 30-second lock; restarting the
+  app does not remove it.
+- Password resets issue a strong temporary password. The user must change it
+  in My Dashboard before inventory or admin actions are allowed.
+- Keep the project folder and inventory.db restricted to trusted Windows
+  accounts, because this is a local desktop system.
 
 More help
 ---------

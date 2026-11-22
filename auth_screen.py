@@ -1,6 +1,7 @@
-"""The Sign In and Create Account screen shown before the inventory opens."""
+"""The Staff Login, Admin Login, and Create Account screen."""
 
 import tkinter as tk
+from tkinter import ttk
 
 import auth
 import database
@@ -37,9 +38,15 @@ class AuthScreen:
     def __init__(self, root, on_success, mode=None):
         self.root = root
         self.on_success = on_success
-        self.mode = mode or ("sign_in" if database.count_users() else "sign_up")
+        self.has_users = database.count_users() > 0
+        if mode == "sign_in":
+            mode = "staff_sign_in"
+        if self.has_users and mode == "sign_up":
+            mode = "staff_sign_in"
+        self.mode = mode or ("staff_sign_in" if self.has_users else "sign_up")
         self.show_password = False
         self.busy = False
+        self.role_var = tk.StringVar(value="Staff")
 
         self.vars = {name: tk.StringVar() for name in ("full_name", "username", "password", "confirm")}
         self.error_var = tk.StringVar()
@@ -50,8 +57,29 @@ class AuthScreen:
         for name in ("full_name", "username", "password", "confirm"):
             self.vars[name].trace_add("write", lambda *args, n=name: self.reach(n))
 
-        self.root.title("Sign In - Product Inventory System")
+        self.update_window_title()
         self.build()
+
+    @property
+    def signing_up(self):
+        return self.mode in ("sign_up", "request_account")
+
+    @property
+    def initial_setup(self):
+        return self.mode == "sign_up"
+
+    @property
+    def login_role(self):
+        return "admin" if self.mode == "admin_sign_in" else "staff"
+
+    def update_window_title(self):
+        title = {
+            "staff_sign_in": "Staff Login",
+            "admin_sign_in": "Admin Login",
+            "sign_up": "Create Account",
+            "request_account": "Request Account",
+        }[self.mode]
+        self.root.title(f"{title} - Product Inventory System")
 
     # ------------------------------------------------------------------ layout
 
@@ -132,8 +160,17 @@ class AuthScreen:
     def build_tabs(self):
         tabs = tk.Frame(self.card, bg=COLORS["input"], padx=3, pady=3, highlightthickness=1, highlightbackground=COLORS["line_high"])
         tabs.pack(fill=tk.X, pady=(0, 18))
-        tabs.columnconfigure((0, 1), weight=1, uniform="tabs")
-        for column, (mode, text) in enumerate((("sign_in", "Sign In"), ("sign_up", "Create Account"))):
+        options = (
+            (
+                ("staff_sign_in", "Staff Login"),
+                ("admin_sign_in", "Admin Login"),
+                ("request_account", "Request Account"),
+            )
+            if self.has_users
+            else (("sign_up", "Initial Admin Setup"),)
+        )
+        tabs.columnconfigure(tuple(range(len(options))), weight=1, uniform="tabs")
+        for column, (mode, text) in enumerate(options):
             active = mode == self.mode
             FlatButton(
                 tabs, text, lambda value=mode: self.switch_mode(value),
@@ -150,14 +187,21 @@ class AuthScreen:
         self.entries = {}
         self.reached = -1
         area = self.form_area
-        signing_up = self.mode == "sign_up"
+        signing_up = self.signing_up
 
-        title = "Create your account" if signing_up else "Welcome back"
-        subtitle = (
-            "Sign up to start managing the inventory."
-            if signing_up
-            else "Sign in with your username and password to continue."
-        )
+        if self.initial_setup:
+            title = "Set up the administrator"
+            subtitle = "Create the first administrator account to start using the system."
+        elif self.mode == "request_account":
+            title = "Request an account"
+            subtitle = "Submit your details for administrator review. You cannot sign in until approved."
+        else:
+            title = f"{self.login_role.title()} login"
+            subtitle = (
+                "Sign in with an administrator account to open the Admin Dashboard."
+                if self.login_role == "admin"
+                else "Sign in with a staff account to open the inventory."
+            )
         tk.Label(area, text=title, bg=COLORS["card"], fg=COLORS["strong"], font=sans(18, "bold")).pack(anchor=tk.W)
         tk.Label(area, text=subtitle, bg=COLORS["card"], fg=COLORS["muted"], font=sans(9), wraplength=340, justify=tk.LEFT).pack(
             anchor=tk.W, pady=(2, 6)
@@ -166,6 +210,14 @@ class AuthScreen:
         if signing_up:
             self.add_field("full_name", "Full Name")
         self.add_field("username", "Username", hint="3-20 letters, numbers, . or _" if signing_up else None)
+        if self.mode == "request_account":
+            role_row = tk.Frame(area, bg=COLORS["card"])
+            role_row.pack(fill=tk.X, pady=(12, 0))
+            tk.Label(role_row, text="Requested Role", bg=COLORS["card"], fg=COLORS["dim"], font=sans(8, "bold")).pack(anchor=tk.W)
+            self.role = ttk.Combobox(
+                role_row, textvariable=self.role_var, values=("Staff", "Admin"), state="readonly", width=36,
+            )
+            self.role.pack(fill=tk.X, pady=(4, 0))
         self.add_field("password", "Password", secret=True,
                        hint=f"{MIN_PASSWORD_LENGTH} or more, with a letter and a number" if signing_up else None)
         if signing_up:
@@ -189,25 +241,25 @@ class AuthScreen:
         self.show_or_hide_error()
 
         self.submit_button = FlatButton(
-            area, "Create Account" if signing_up else "Sign In", self.submit,
+            area,
+            ("Create Admin Account" if self.initial_setup else "Submit Request") if signing_up else f"{self.login_role.title()} Login",
+            self.submit,
             COLORS["button"], COLORS["button_text"], COLORS["primary_hover"], font_size=10, pady=10, border=COLORS["button"],
         )
         self.submit_button.pack(fill=tk.X, pady=(16, 0))
 
-        switch = tk.Frame(area, bg=COLORS["card"])
-        switch.pack(pady=(14, 0))
+        if self.initial_setup:
+            account_note = "This first account will be the administrator."
+        elif self.mode == "request_account":
+            account_note = "An administrator chooses the final role during approval."
+        else:
+            account_note = "New accounts require administrator approval."
         tk.Label(
-            switch, text="Already have an account?" if signing_up else "New here?", bg=COLORS["card"], fg=COLORS["muted"], font=sans(9),
-        ).pack(side=tk.LEFT)
-        link = tk.Label(
-            switch, text="Sign in" if signing_up else "Create an account", bg=COLORS["card"], fg=COLORS["primary"],
-            font=sans(9, "bold"), cursor="hand2",
-        )
-        link.pack(side=tk.LEFT, padx=(4, 0))
-        link.bind("<Button-1>", lambda event: self.switch_mode("sign_in" if signing_up else "sign_up"))
+            area, text=account_note, bg=COLORS["card"], fg=COLORS["muted"], font=sans(9),
+        ).pack(pady=(14, 0))
 
         first = "full_name" if signing_up else "username"
-        if self.mode == "sign_in" and self.vars["username"].get():
+        if not signing_up and self.vars["username"].get():
             first = "password"
         self.root.after_idle(lambda: self.entries[first].winfo_exists() and self.entries[first].focus_set())
         self.live_check()
@@ -275,7 +327,7 @@ class AuthScreen:
         """
         if "username" not in self.entries:
             return
-        signing_up = self.mode == "sign_up"
+        signing_up = self.signing_up
         names = list(self.entries)
         focused = self.root.focus_get()
         # Warn about boxes before the one the cursor is in (or before the furthest box reached).
@@ -307,7 +359,7 @@ class AuthScreen:
 
         try:
             validate_username(username)
-            taken = database.get_user_by_username(username) is not None
+            taken = database.get_user_by_username(username) is not None or database.pending_registration_exists(username)
         except (ValidationError, Exception):
             taken = None  # not a full username yet, or the database could not be read
         if taken is None:
@@ -376,6 +428,7 @@ class AuthScreen:
         if mode == self.mode:
             return
         self.mode = mode
+        self.update_window_title()
         self.vars["password"].set("")
         self.vars["confirm"].set("")
         self.error_var.set("")
@@ -401,14 +454,21 @@ class AuthScreen:
         self.root.update_idletasks()
         values = {name: var.get() for name, var in self.vars.items()}
         try:
-            if self.mode == "sign_up":
-                user = auth.sign_up(values["full_name"], values["username"], values["password"], values["confirm"])
+            if self.signing_up:
+                if self.initial_setup:
+                    user = auth.sign_up(values["full_name"], values["username"], values["password"], values["confirm"])
+                else:
+                    auth.request_account(
+                        values["full_name"], values["username"], values["password"], values["confirm"],
+                        self.role_var.get().lower(),
+                    )
+                    user = None
             else:
-                user = auth.sign_in(values["username"], values["password"])
+                user = auth.sign_in(values["username"], values["password"], required_role=self.login_role)
         except ValidationError as error:
             self.busy = False
             self.submit_button.set_enabled(True)
-            if error.field == "password" and self.mode == "sign_in":
+            if error.field == "password" and not self.signing_up:
                 self.vars["password"].set("")
             self.show_error(error.message, error.field)
             return
@@ -421,11 +481,19 @@ class AuthScreen:
         self.vars["password"].set("")
         self.vars["confirm"].set("")
 
-        if self.mode == "sign_up":
+        if self.mode == "request_account":
+            self.vars["full_name"].set("")
+            self.vars["username"].set("")
+            self.switch_mode("staff_sign_in")
+            self.show_success("Your account request was submitted. Please wait for an administrator to approve it.")
+            return
+
+        if self.signing_up:
             # A new account does not sign in by itself: the user signs in with the details they just made.
             self.vars["full_name"].set("")
             self.vars["username"].set(user.username)
-            self.switch_mode("sign_in")
+            self.has_users = True
+            self.switch_mode("admin_sign_in" if user.is_admin else "staff_sign_in")
             self.show_success(f"Account created for {user.full_name}. Please sign in with your new username and password.")
             return
 

@@ -211,7 +211,7 @@ def apply_ttk_theme(root):
     root.option_add("*TCombobox*Listbox.relief", "flat")
 
 
-class FlatButton(tk.Label):
+class FlatButton(tk.Button):
     """A flat button with hover colors that looks the same on Windows, macOS, and Linux."""
 
     def __init__(self, parent, text, command, bg, fg, hover_bg=None, font_size=9, padx=14, pady=7, border=None, hover_fg=None, weight="bold", family=None):
@@ -224,17 +224,29 @@ class FlatButton(tk.Label):
             padx=padx,
             pady=pady,
             cursor="hand2",
+            takefocus=1,
+            command=command,
+            relief=tk.FLAT,
+            bd=0,
+            activebackground=hover_bg or bg,
+            activeforeground=hover_fg or fg,
+            disabledforeground=COLORS["faint"],
             highlightthickness=1 if border else 0,
             highlightbackground=border or bg,
         )
-        self.command = command
         self.border = border or bg
         self.colors = (bg, fg, hover_bg or bg, hover_fg or fg)
         self.enabled = True
 
         self.bind("<Enter>", self.on_enter)
         self.bind("<Leave>", self.on_leave)
-        self.bind("<Button-1>", self.on_click)
+        self.bind("<Return>", lambda event: self.invoke())
+        self.bind("<FocusIn>", self.on_focus)
+        self.bind("<FocusOut>", self.on_leave)
+
+    def on_focus(self, event=None):
+        if self.enabled:
+            self.configure(highlightthickness=2, highlightbackground=COLORS["primary"])
 
     def on_enter(self, event=None):
         if self.enabled:
@@ -242,15 +254,22 @@ class FlatButton(tk.Label):
 
     def on_leave(self, event=None):
         if self.enabled:
-            self.configure(bg=self.colors[0], fg=self.colors[1])
-
-    def on_click(self, event=None):
-        if self.enabled:
-            self.command()
+            focused = self.focus_get() == self
+            self.configure(
+                bg=self.colors[0], fg=self.colors[1],
+                highlightthickness=2 if focused else (1 if self.border != self.colors[0] else 0),
+                highlightbackground=COLORS["primary"] if focused else self.border,
+            )
 
     def set_enabled(self, enabled):
         self.enabled = enabled
         if enabled:
-            self.configure(bg=self.colors[0], fg=self.colors[1], cursor="hand2", highlightbackground=self.border)
+            self.configure(
+                bg=self.colors[0], fg=self.colors[1], cursor="hand2", takefocus=1,
+                highlightbackground=self.border, state=tk.NORMAL,
+            )
         else:
-            self.configure(bg=COLORS["card_high"], fg=COLORS["faint"], cursor="arrow", highlightbackground=COLORS["line"])
+            self.configure(
+                bg=COLORS["card_high"], fg=COLORS["faint"], cursor="arrow", takefocus=0,
+                highlightbackground=COLORS["line"], state=tk.DISABLED,
+            )

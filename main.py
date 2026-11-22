@@ -329,8 +329,11 @@ class InventoryApp:
 
         Every page opens inside this window, never in a new one.
         """
-        if page == "admin" and not self.user.is_admin:
-            page = "profile"
+        if page == "admin":
+            try:
+                auth.require_permission(self.user, "manage_accounts")
+            except ValidationError:
+                page = "profile"
         if user_id == self.user.user_id:
             user_id = None
         if page == "profile" and user_id is not None and not self.user.is_admin:
@@ -967,7 +970,10 @@ class InventoryApp:
         """Open the DB Records window, or bring it to the front if it is already open (admins only)."""
         import database_viewer
 
-        if not self.user.is_admin:
+        try:
+            auth.require_permission(self.user, "view_database")
+        except ValidationError as error:
+            self.show_toast(error.message, "error")
             return
 
         if self.viewer_is_open():
@@ -1008,6 +1014,11 @@ class InventoryApp:
             self.update_product()
 
     def add_product(self):
+        try:
+            auth.require_permission(self.user, "edit_products")
+        except ValidationError as error:
+            self.show_error(error.message)
+            return
         values = self.validate_inputs()
         if values is None:
             return
@@ -1023,6 +1034,9 @@ class InventoryApp:
                 f"Adding {values[2]:,} pcs would put this product over {database.MAX_QUANTITY:,} pcs.", self.quantity_entry
             )
             return
+        if result == "forbidden":
+            self.show_error("Your account no longer has permission to change products.")
+            return
 
         self.refresh_data()
         self.clear_fields()
@@ -1035,6 +1049,11 @@ class InventoryApp:
             self.show_toast("Product added successfully.")
 
     def update_product(self):
+        try:
+            auth.require_permission(self.user, "edit_products")
+        except ValidationError as error:
+            self.show_error(error.message)
+            return
         if self.selected_product_id is None:
             self.show_error("Please select a product to update.")
             return
@@ -1053,6 +1072,9 @@ class InventoryApp:
         if result == "duplicate":
             self.show_error("Another product already has the same name, category, and price.", self.name_entry)
             return
+        if result == "forbidden":
+            self.show_error("Your account no longer has permission to change products.")
+            return
         if result == "missing":
             self.refresh_data()
             self.clear_fields()
@@ -1065,8 +1087,10 @@ class InventoryApp:
         self.show_toast("Product updated successfully.")
 
     def delete_product(self):
-        if not self.user.is_admin:
-            self.show_error("Only an admin can delete products. Ask an admin to do it.")
+        try:
+            auth.require_permission(self.user, "delete_products")
+        except ValidationError as error:
+            self.show_error(error.message)
             return
         if self.selected_product_id is None:
             self.show_error("Please select a product to delete.")
@@ -1085,14 +1109,17 @@ class InventoryApp:
             return
 
         try:
-            deleted = database.delete_product(product_id)
+            deleted = database.delete_product(product_id, user_id=self.user.user_id)
         except sqlite3.DatabaseError:
             self.database_problem("delete the product")
             return
 
         self.refresh_data()
         self.clear_fields()
-        if not deleted:
+        if deleted == "forbidden":
+            self.show_error("Only an active administrator can delete products.")
+            return
+        if deleted == "missing":
             self.show_toast("That product was already deleted. The list was refreshed.", "error")
             return
         self.log("DELETE", f"P{product_id:03d} {name} was deleted.", save=True)
@@ -1293,7 +1320,7 @@ def install_error_handler(root):
             text = "The database could not be read or saved. Close any other program using inventory.db and try again."
         else:
             text = "Something went wrong, but your saved products are safe. Please try that again."
-        messagebox.showerror("Unexpected Problem", f"{text}\n\nDetails: {exc_value}", parent=root)
+        messagebox.showerror("Unexpected Problem", text, parent=root)
 
     root.report_callback_exception = report
 
@@ -1306,16 +1333,28 @@ def main():
     try:
         database.initialize_database()
     except sqlite3.DatabaseError as error:
-        messagebox.showerror("Database Problem", f"inventory.db could not be opened.\n\nDetails: {error}", parent=root)
+        traceback.print_exception(type(error), error, error.__traceback__)
+        messagebox.showerror("Database Problem", "inventory.db could not be opened. Check file access and try again.", parent=root)
         root.destroy()
         return
 
     def show_sign_in():
-        root.title(f"Sign In - {WINDOW_TITLE}")
-        AuthScreen(root, on_success=show_inventory, mode="sign_in" if database.count_users() else "sign_up")
+        AuthScreen(root, on_success=show_inventory, mode="staff_sign_in" if database.count_users() else "sign_up")
 
     def show_inventory(user):
         app = InventoryApp(root, user, on_sign_out=show_sign_in)
+        if user.must_change_password:
+            app.show_page("profile", user.user_id)
+            root.after(
+                100,
+                lambda: messagebox.showwarning(
+                    "Change Temporary Password",
+                    "For your security, change the temporary password now in My Dashboard.",
+                    parent=root,
+                ),
+            )
+        elif user.is_admin:
+            app.show_page("admin")
         app.show_toast(f"Signed in as {user.full_name}.", "info")
 
     show_sign_in()

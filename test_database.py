@@ -100,12 +100,26 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(database.update_product(999, "Ghost", "Other", 1, 1), "missing")
 
     def test_delete_missing_product(self):
-        self.assertFalse(database.delete_product(999))
+        self.assertEqual(database.delete_product(999), "missing")
 
     def test_tables_are_created(self):
         with database.database_connection() as connection:
             names = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        self.assertTrue({"products", "users", "activity_log"} <= names)
+        self.assertTrue({"products", "users", "registration_requests", "activity_log", "login_attempts"} <= names)
+
+    def test_csv_export_escapes_spreadsheet_formulas(self):
+        for dangerous in ("=1+1", "+SUM(A1:A2)", "-2+3", "@cmd", "\tformula", "\rformula"):
+            self.assertEqual(database_viewer.csv_safe(dangerous), "'" + dangerous)
+        self.assertEqual(database_viewer.csv_safe("ordinary text"), "ordinary text")
+
+    def test_database_viewer_exposes_five_safe_views(self):
+        self.assertEqual(
+            set(database_viewer.TABLES),
+            {"products", "users", "registration_requests", "login_attempts", "activity_log"},
+        )
+        for table in database_viewer.TABLES.values():
+            self.assertNotIn("password_hash", table["columns"])
+            self.assertNotIn("photo", table["columns"])
 
 
 class AuthTests(unittest.TestCase):
@@ -129,6 +143,7 @@ class AuthTests(unittest.TestCase):
         self.assertTrue(auth.verify_password("secret123", first))
         self.assertFalse(auth.verify_password("Secret123", first))
         self.assertFalse(auth.verify_password("secret123", "not a hash"))
+        self.assertFalse(auth.verify_password("secret123", "pbkdf2_sha256$999999999$00$00"))
 
     def test_sign_up_and_sign_in(self):
         user = auth.sign_up("Juan Dela Cruz", "juan_dc", "inventory1", "inventory1")
@@ -144,9 +159,9 @@ class AuthTests(unittest.TestCase):
         self.assertIsNotNone(database.get_user_by_username("juan_dc")["last_login"])
 
     def test_username_must_be_unique(self):
-        auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
+        admin = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
         with self.assertRaises(ValidationError) as caught:
-            auth.sign_up("Another Juan", "JUAN", "inventory2", "inventory2")
+            auth.admin_create_user(admin, "Another Juan", "JUAN", "inventory2", "inventory2", "staff")
         self.assertEqual(caught.exception.field, "username")
         self.assertEqual(database.count_users(), 1)
 
@@ -165,6 +180,8 @@ class AuthTests(unittest.TestCase):
         with self.assertRaises(ValidationError) as caught:
             auth.sign_in("maria", "inventory1")  # even the right password waits during the lockout
         self.assertIn("wait", caught.exception.message)
+        auth._failed_attempts.clear()  # restarting the UI cannot bypass the database lockout
+        self.assertGreater(auth.seconds_locked("maria"), 0)
 
     def test_activity_is_saved_with_the_user(self):
         user = auth.sign_up("Maria Santos", "maria", "inventory1", "inventory1")
@@ -176,7 +193,7 @@ class AuthTests(unittest.TestCase):
 
     def test_products_remember_who_changed_them(self):
         juan = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
-        maria = auth.sign_up("Maria Santos", "maria", "inventory2", "inventory2")
+        maria = auth.admin_create_user(juan, "Maria Santos", "maria", "inventory2", "inventory2", "staff")
         database.add_product("Pen", "School Supplies", 10, 12, user_id=juan.user_id)
         product = database.get_products()[0]
         self.assertEqual(product["created_by_name"], "juan")
@@ -189,7 +206,7 @@ class AuthTests(unittest.TestCase):
 
     def test_profile_stats_and_team(self):
         juan = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
-        auth.sign_up("Maria Santos", "maria", "inventory2", "inventory2")
+        auth.admin_create_user(juan, "Maria Santos", "maria", "inventory2", "inventory2", "staff")
         for action in ("ADD", "ADD", "UPDATE", "RESTOCK", "DELETE"):
             database.add_activity(juan.user_id, action, "test")
         stats = database.get_user_stats(juan.user_id)
@@ -243,15 +260,86 @@ class AuthTests(unittest.TestCase):
 
     def test_first_account_is_admin_and_others_are_staff(self):
         first = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
-        second = auth.sign_up("Maria Santos", "maria", "inventory2", "inventory2")
+        second = auth.admin_create_user(first, "Maria Santos", "maria", "inventory2", "inventory2", "staff")
         self.assertTrue(first.is_admin)
         self.assertFalse(second.is_admin)
         self.assertEqual(auth.sign_in("maria", "inventory2").role, "staff")
         self.assertEqual(auth.sign_in("juan", "inventory1").role, "admin")
 
+    def test_login_portals_require_the_matching_role(self):
+        admin = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
+        staff = auth.admin_create_user(admin, "Maria Santos", "maria", "inventory2", "inventory2", "staff")
+
+        self.assertEqual(auth.sign_in("juan", "inventory1", required_role="admin"), admin)
+        self.assertEqual(auth.sign_in("maria", "inventory2", required_role="staff"), staff)
+        with self.assertRaises(ValidationError) as caught:
+            auth.sign_in("maria", "inventory2", required_role="admin")
+        self.assertIn("Administrator account required", caught.exception.message)
+        with self.assertRaises(ValidationError) as caught:
+            auth.sign_in("juan", "inventory1", required_role="staff")
+        self.assertIn("Staff account required", caught.exception.message)
+
+    def test_registration_requires_admin_approval(self):
+        admin = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
+        request_id = auth.request_account("Maria Santos", "maria", "inventory2", "inventory2", "admin")
+
+        self.assertEqual(database.count_users(), 1)
+        self.assertEqual(database.get_pending_registration_requests()[0]["request_id"], request_id)
+        with database.database_connection() as connection:
+            pending_hash = connection.execute(
+                "SELECT password_hash FROM registration_requests WHERE request_id = ?", (request_id,)
+            ).fetchone()["password_hash"]
+        self.assertNotIn("inventory2", pending_hash)
+        with self.assertRaises(ValidationError):
+            auth.sign_in("maria", "inventory2")
+
+        approved = auth.admin_approve_registration(admin, request_id, "staff")
+        self.assertEqual(approved.role, "staff")
+        self.assertEqual(auth.sign_in("maria", "inventory2", required_role="staff").user_id, approved.user_id)
+        self.assertEqual(database.get_pending_registration_requests(), [])
+        with database.database_connection() as connection:
+            saved = connection.execute(
+                "SELECT status, password_hash FROM registration_requests WHERE request_id = ?", (request_id,)
+            ).fetchone()
+        self.assertEqual((saved["status"], saved["password_hash"]), ("approved", ""))
+
+    def test_rejected_registration_cannot_sign_in(self):
+        admin = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
+        request_id = auth.request_account("Maria Santos", "maria", "inventory2", "inventory2", "staff")
+        auth.admin_reject_registration(admin, request_id)
+
+        with self.assertRaises(ValidationError):
+            auth.sign_in("maria", "inventory2")
+        with database.database_connection() as connection:
+            saved = connection.execute(
+                "SELECT status, password_hash FROM registration_requests WHERE request_id = ?", (request_id,)
+            ).fetchone()
+        self.assertEqual((saved["status"], saved["password_hash"]), ("rejected", ""))
+
+    def test_rbac_uses_current_saved_role(self):
+        admin = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
+        staff = auth.admin_create_user(admin, "Maria Santos", "maria", "inventory2", "inventory2", "staff")
+        forged_admin = auth.User(staff.user_id, staff.username, staff.full_name, role="admin")
+        request_id = auth.request_account("Pedro Cruz", "pedro", "inventory3", "inventory3", "admin")
+
+        self.assertIsNotNone(auth.require_permission(staff, "edit_products"))
+        with self.assertRaises(ValidationError):
+            auth.admin_create_user(forged_admin, "Pedro Cruz", "pedro", "inventory3", "inventory3", "admin")
+        self.assertEqual(database.approve_registration_request(request_id, staff.user_id, "admin"), "forbidden")
+        self.assertTrue(database.pending_registration_exists("pedro"))
+        auth.admin_set_active(admin, staff.user_id, False)
+        with self.assertRaises(ValidationError):
+            auth.require_permission(staff, "edit_products")
+        with self.assertRaises(ValidationError):
+            auth.sign_up("Another User", "another", "inventory4", "inventory4")
+        self.assertEqual(database.add_product("Pen", "Other", 1, 1, user_id=staff.user_id), "forbidden")
+        self.assertEqual(database.delete_product(999, user_id=staff.user_id), "forbidden")
+        with self.assertRaises(ValidationError):
+            auth.change_full_name(staff, "Inactive Staff")
+
     def test_admin_tools(self):
         admin = auth.sign_up("Juan Dela Cruz", "juan", "inventory1", "inventory1")
-        staff = auth.sign_up("Maria Santos", "maria", "inventory2", "inventory2")
+        staff = auth.admin_create_user(admin, "Maria Santos", "maria", "inventory2", "inventory2", "staff")
 
         with self.assertRaises(ValidationError):
             auth.admin_set_active(staff, admin.user_id, False)  # staff cannot use admin tools
@@ -267,9 +355,18 @@ class AuthTests(unittest.TestCase):
         auth.admin_set_active(admin, staff.user_id, True)
 
         temporary = auth.admin_reset_password(admin, staff.user_id)
+        self.assertGreaterEqual(len(temporary), 16)
+        self.assertTrue(database.get_user_by_id(staff.user_id)["must_change_password"])
         with self.assertRaises(ValidationError):
             auth.sign_in("maria", "inventory2")
-        self.assertEqual(auth.sign_in("maria", temporary).username, "maria")
+        reset_user = auth.sign_in("maria", temporary)
+        self.assertEqual(reset_user.username, "maria")
+        self.assertTrue(reset_user.must_change_password)
+        with self.assertRaises(ValidationError):
+            auth.require_permission(reset_user, "edit_products")
+        reset_user = auth.change_password(reset_user, temporary, "replacement9", "replacement9")
+        self.assertFalse(reset_user.must_change_password)
+        self.assertIsNotNone(auth.require_permission(reset_user, "edit_products"))
 
         auth.admin_set_role(admin, staff.user_id, "admin")
         self.assertEqual(database.get_user_by_id(staff.user_id)["role"], "admin")
@@ -333,7 +430,10 @@ class PhotoTests(unittest.TestCase):
         self.assertIn("Removed profile photo.", details)
 
     def test_gif_is_allowed(self):
-        auth.change_photo(self.user, self.picture("me.gif", b"GIF89a" + b"\x00" * 20))
+        gif = bytes.fromhex(
+            "47494638396101000100800000ffffff00000021f90401000000002c00000000010001000002024401003b"
+        )
+        auth.change_photo(self.user, self.picture("me.gif", gif))
         self.assertTrue(database.get_photo(self.user.user_id).startswith(b"GIF89a"))
 
     def test_wrong_type_is_refused(self):

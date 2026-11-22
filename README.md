@@ -8,8 +8,8 @@ Each person signs in with their own account first. Passwords are never saved as 
 
 There are two kinds of accounts:
 
-- **Admin:** the first account made on a computer. An admin can do everything, including deleting products, opening Database Records, and using the **Admin Dashboard** to see all users and manage accounts.
-- **Staff:** every account made after the first one. Staff can add and update products and use **My Dashboard**, but cannot delete products or open Database Records.
+- **Admin:** the first account made on a computer, plus accounts that an existing admin creates or approves as Admin. An admin can delete products, open Database Records, review account requests, and manage accounts.
+- **Staff:** accounts that an admin creates or approves as Staff. Staff can add and update products and use **My Dashboard**, but cannot delete products or open administrative pages.
 
 Every page (Inventory, My Dashboard, Admin Dashboard, and each user's profile) opens inside the same main window. Nothing opens in a new window except the Database Records viewer.
 
@@ -34,8 +34,8 @@ crud-project-IM102/
 |-- main.py              (main window, page switching, and product CRUD)
 |-- profile_page.py      (My Dashboard and user profiles)
 |-- admin_page.py        (Admin Dashboard)
-|-- auth_screen.py       (Sign In and Create Account screen)
-|-- auth.py              (password hashing, sign up, sign in)
+|-- auth_screen.py       (Staff Login, Admin Login, and account request screen)
+|-- auth.py              (password hashing, approval, RBAC, and sign in)
 |-- validation.py        (input checks shared by every form)
 |-- database.py          (tables and SQL commands)
 |-- database_viewer.py   (Database Records window)
@@ -47,11 +47,11 @@ crud-project-IM102/
 |-- .gitignore
 |-- documentation/
 |   |-- IM102_Inventory_System_Documentation.docx
+|   |-- IM102_Inventory_System_Documentation.pdf
 |   |-- flowchart.mmd
 |   `-- flowchart.png
 `-- screenshots/
     |-- README.md
-|-- HOW_TO_RUN.txt       (short guide for running the app)
     `-- (pictures used in the documentation)
 ```
 
@@ -62,26 +62,31 @@ crud-project-IM102/
 | Table | What it keeps |
 | --- | --- |
 | `products` | product_id, product_name, category, quantity, unit_price, created_by and updated_by (link to `users`), created_at, updated_at |
-| `users` | user_id, username (unique), full_name, password_hash, created_at, last_login, role (admin or staff), is_active |
+| `users` | user_id, username (unique), full_name, password_hash, created_at, last_login, role, is_active, photo, must_change_password |
+| `registration_requests` | pending account requests, requested role, review status, and approving admin |
+| `login_attempts` | persistent failed-attempt counts and lock expiry by username |
 | `activity_log` | log_id, user_id (links to `users`), action, details, created_at |
 
 An older `inventory.db` from before accounts were added still works. The new tables and columns are added the next time the app starts, and the saved products are kept. If an older database has accounts but no admin yet, the oldest account becomes the admin.
 
-## Sign In and Sign Up
+## Staff Login, Admin Login, and Account Requests
 
-The first time the app runs there are no accounts yet, so it opens on **Create Account**. After that it opens on **Sign In**.
+The first time the app runs there are no accounts, so it opens on **Initial Admin Setup**. This one-time setup creates the first administrator. Afterward, the authentication screen provides **Staff Login**, **Admin Login**, and **Request Account**. A request can ask for Staff or Admin access, but the selected role is only a request. An administrator chooses the final role during approval.
 
 - **Full name:** required, up to 60 characters.
 - **Username:** 3 to 20 letters, numbers, dots, or underscores. It must not be used by another account (capital letters do not matter, so `Juan` and `juan` are the same).
 - **Password:** at least 8 characters with at least one letter and one number, cannot be the same as the username, and must be typed twice the same way.
 - **Show password** shows what you typed, and a warning appears when Caps Lock is on.
-- Messages appear while you type. On **Create Account**, the screen says right away if the username is already taken or available, and if the two passwords match. On both screens, if you click or type in a box while an earlier box is still empty, the empty box says it must be filled in first (for example "Please enter your username first.").
-- After 5 wrong passwords in a row, sign in for that username is paused for 30 seconds.
-- After **Create Account**, the app does not sign you in. It goes back to the Sign In screen with your new username filled in, and you sign in with the username and password you just made.
+- Messages appear while you type. On **Initial Admin Setup** and **Request Account**, the screen checks username availability and whether the passwords match.
+- After 5 wrong passwords in a row, sign in for that username is paused for 30 seconds. The lock is saved in SQLite, so closing and reopening the app does not bypass it.
+- A requested account cannot sign in while it is pending. Rejected requests never become accounts.
+- Staff accounts cannot use Admin Login, and admin accounts cannot use Staff Login. Admin Login opens the Admin Dashboard directly.
 - An inactive account (deactivated by an admin) cannot sign in until an admin activates it again.
 - **Sign Out** is at the bottom of the side menu. It goes back to the Sign In screen.
 
-How passwords are kept safe: each password is mixed with a random 16-byte salt and run through PBKDF2-HMAC-SHA256 240,000 times (Python's built-in `hashlib`). Only the result is saved in `users.password_hash`. When you sign in, the same steps are done again and the two results are compared with `hmac.compare_digest`. Nobody, including the teacher opening the database, can read the original password.
+How passwords are kept safe: each password is mixed with a random 16-byte salt and run through PBKDF2-HMAC-SHA256 600,000 times (Python's built-in `hashlib`, following the current OWASP recommendation). Only the hash is saved. Unsafe stored work factors are rejected. A pending request keeps the hash until review, then erases its request copy after approval or rejection. Sign-in comparison uses `hmac.compare_digest`, so the original password cannot be read from the database.
+
+Role-based access control (RBAC) checks the account's current saved role, active status, and temporary-password status. Sensitive account changes and product mutations repeat authorization inside the database transaction, so forged or stale in-memory roles cannot bypass the backend. Initial-admin creation and last-active-admin protection are atomic.
 
 ## My Dashboard (every user)
 
@@ -91,21 +96,24 @@ Click **My Dashboard** in the side menu, or click your name at the bottom of it.
 - How many products you added, updated or added stock to, and deleted
 - Your own saved activity, newest first
 - **Edit Profile** to change your full name, and **Change Password** (you must type your current password first)
-- **Change Photo** to add or change your profile photo (a PNG or GIF picture under 2 MB, saved inside `inventory.db`), and **Remove Photo** to go back to your initials
+- **Change Photo** to add or change a structurally valid PNG or GIF picture under 2 MB and no larger than 4096 × 4096, and **Remove Photo** to go back to your initials
 
 ## Admin Dashboard (admins only)
 
 Click **Admin Dashboard** in the side menu. It shows:
 
 - Total Users, Active Users, Changes Today, and Changes in the Last 7 Days
+- **Pending Account Requests**, where an admin can approve a request as Staff or Admin, or reject it
 - The **Users** list with each user's role, status (Active or Inactive), number of changes, last update, and last sign in
 - **All Activity**, which shows who did what, newest first. Click **Products Only** to hide sign-ins and sign-outs.
+
+An admin can also click **Create Account** to create a Staff or Admin account directly. This action is already authorized by the signed-in administrator and is recorded in the activity log.
 
 Double-click a user in the Users list (or click **View Profile**) to open their profile in the same window. There an admin can:
 
 - **Set as Admin** or **Set as Staff** (the last admin cannot be set as staff)
 - **Deactivate Account** or **Activate Account** (you cannot deactivate your own account)
-- **Reset Password**, which shows a temporary password like `temp123456` to tell the person. They can change it in My Dashboard.
+- **Reset Password**, which generates a strong random 16-character temporary password. The user is sent to My Dashboard after sign-in and cannot perform inventory or admin work until that password is replaced.
 
 Every one of these actions is saved in the activity log with the admin's name. **‹ Back to Admin Dashboard** goes back to the Users list.
 
@@ -117,6 +125,7 @@ Every one of these actions is saved in the activity log with the admin's name. *
 | Delete products | Yes | No |
 | My Dashboard, change own name and password | Yes | Yes |
 | Admin Dashboard, see everyone's activity | Yes | No |
+| Create accounts and approve or reject requests | Yes | No |
 | Change roles, activate or deactivate accounts, reset passwords | Yes | No |
 | Database Records window | Yes | No |
 
@@ -128,7 +137,7 @@ To get the project on another laptop, download it from GitHub first. Either clic
 git clone https://github.com/krstnkye/crud-project-IM102.git
 ```
 
-Each laptop starts with an empty `inventory.db`. The first account made on that laptop becomes the Admin.
+Each laptop starts with an empty `inventory.db`. Initial Admin Setup creates the first administrator. Every later account requires an administrator to create or approve it.
 
 1. Open the `crud-project-IM102` folder in VS Code or IDLE.
 2. Open a terminal in that folder.
@@ -153,8 +162,8 @@ py main.py
 | Delete | Removes the selected product after asking first (admins only). |
 | Clear Fields | Empties the form so you can type again. |
 | New Product | Clears the form and puts the cursor in Product Name. |
-| Database Records | (Admins only) Opens a window that shows the raw rows of the `products`, `users`, and `activity_log` tables, the database details, and quick queries. It updates by itself after every change. |
-| Export CSV | In the Database Records window, saves the rows shown to a CSV file you can open in Excel. Password hashes are never exported. |
+| Database Records | (Admins only) Opens fixed, read-only views of `products`, `users`, `registration_requests`, `login_attempts`, and `activity_log`. Password hashes and photo bytes are excluded. |
+| Export CSV | Saves the shown rows to a CSV file. Password hashes are never exported, and formula-like text is neutralized before Excel opens it. |
 | My Dashboard | Shows your profile, your activity, and lets you change your name and password. |
 | Admin Dashboard | (Admins only) Shows all users, everyone's activity, and account tools. |
 | Sign Out | Signs out and goes back to the Sign In screen. |
@@ -208,10 +217,11 @@ A red message appears inside the form when:
 - No product is selected before updating or deleting
 - A staff account tries to delete a product (only an admin can)
 
-The Sign In and Create Account screen shows the same kind of red message when:
+The login and account request screen shows the same kind of red message when:
 
 - A box is empty, or the username or password does not follow the rules above
 - The username is already taken
+- A request for the username is already pending
 - The two passwords do not match
 - The username or password is wrong (it shows how many tries are left)
 
@@ -219,7 +229,7 @@ Deleting a product and signing out ask for confirmation in a pop-up first. If th
 
 ## Automatic Tests
 
-`test_database.py` has 35 tests. They check adding, adding to an existing product, updating, deleting, the totals, the product and sign up input checks, password hashing, sign up (without signing in), sign in, duplicate usernames, the wrong-password pause, the saved activity log, who changed each product, profile numbers, changing your name and password, the Admin and Staff roles, the admin tools (roles, deactivating accounts, password reset), opening older databases, and adding or removing a profile photo. It uses a temporary database, so your saved products are not touched. Run it from the project folder:
+`test_database.py` has 41 tests. They check product CRUD, validation, 600,000-round password hashing, persistent lockout, separate login portals, approval and rejection, atomic RBAC and last-admin rules, secure reset-password enforcement, safe database views, CSV formula safety, activity history, migrations, and profile-photo validation. It uses a temporary database, so your saved products are not touched. Run it from the project folder:
 
 ```bash
 python -m unittest test_database.py
@@ -229,7 +239,7 @@ It should end with `OK`.
 
 ## Suggested Manual Testing
 
-1. Create the first account (it becomes the admin). Check that the app goes back to Sign In, then sign in with it.
+1. Complete Initial Admin Setup, then sign in through Admin Login.
 2. Try signing in with a wrong password.
 3. Add a product.
 4. Check if it appears in the product list.
@@ -239,6 +249,7 @@ It should end with `OK`.
 8. Select a product and update it.
 9. Delete a product.
 10. Open My Dashboard and check that your changes are listed.
-11. Sign out and create a second account (it becomes staff). Sign in and check that Delete, Database Records, and Admin Dashboard are not available.
-12. Sign in as the admin, open Admin Dashboard, open the staff profile, and try Reset Password and Deactivate Account.
-13. Close and open the app again to check if saved products and the activity log are still there.
+11. Sign out, submit an account request, and confirm that it cannot sign in while pending.
+12. Sign in as the admin and approve the request as Staff. Sign in as that user and check that administrative features are unavailable.
+13. As the admin, test rejecting another request and creating an account directly with the Staff/Admin selector.
+14. Close and open the app again to check if saved products and the activity log are still there.

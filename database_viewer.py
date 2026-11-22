@@ -24,7 +24,7 @@ QUERIES = {
     "Sort by price": (f"{SELECT} ORDER BY unit_price DESC", ()),
 }
 
-# The three tables in inventory.db, with their columns, widths, and quick queries.
+# The fixed read-only tables in inventory.db. Sensitive password hashes and photo bytes are excluded.
 TABLES = {
     "products": {
         "columns": COLUMNS + ("created_by", "updated_by", "updated_at"),
@@ -34,10 +34,33 @@ TABLES = {
         "queries": QUERIES,
     },
     "users": {
-        "columns": ("user_id", "username", "full_name", "password_hash", "created_at", "last_login"),
-        "widths": {"user_id": 150, "username": 150, "full_name": 170, "password_hash": 260, "created_at": 150, "last_login": 150},
+        "columns": ("user_id", "username", "full_name", "role", "is_active", "created_at", "last_login"),
+        "widths": {"user_id": 100, "username": 140, "full_name": 190, "role": 100, "is_active": 100, "created_at": 150, "last_login": 150},
         "right": (),
         "queries": {"All users": ("SELECT * FROM users ORDER BY user_id", ())},
+    },
+    "registration_requests": {
+        "columns": (
+            "request_id", "username", "full_name", "requested_role", "status", "created_at",
+            "reviewed_at", "reviewed_by",
+        ),
+        "widths": {
+            "request_id": 95, "username": 130, "full_name": 180, "requested_role": 110,
+            "status": 100, "created_at": 150, "reviewed_at": 150, "reviewed_by": 100,
+        },
+        "right": (),
+        "queries": {
+            "All requests": ("SELECT * FROM registration_requests ORDER BY request_id DESC", ()),
+            "Pending only": (
+                "SELECT * FROM registration_requests WHERE status = 'pending' ORDER BY request_id", ()
+            ),
+        },
+    },
+    "login_attempts": {
+        "columns": ("username", "failures", "locked_until"),
+        "widths": {"username": 200, "failures": 120, "locked_until": 220},
+        "right": ("failures",),
+        "queries": {"All attempts": ("SELECT * FROM login_attempts ORDER BY username COLLATE NOCASE", ())},
     },
     "activity_log": {
         "columns": ("log_id", "user_id", "action", "details", "created_at"),
@@ -52,6 +75,13 @@ TABLES = {
         },
     },
 }
+TABLE_LABELS = {
+    "products": "Products",
+    "users": "Users",
+    "registration_requests": "Account Requests",
+    "login_attempts": "Login Security",
+    "activity_log": "Activity Log",
+}
 
 
 def show_value(column, value):
@@ -60,9 +90,13 @@ def show_value(column, value):
         return "(empty)"
     if column == "unit_price":
         return f"{value:.2f}"
-    if column == "password_hash":
-        # Only the start is shown: enough to prove it is a salted hash, not the password.
-        return value[:34] + "…"
+    return value
+
+
+def csv_safe(value):
+    """Prevent spreadsheet programs from treating exported text as a formula."""
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return "'" + value
     return value
 
 
@@ -124,7 +158,10 @@ class DatabaseViewer:
 
         left = tk.Frame(header, bg=COLORS["header"])
         left.pack(side=tk.LEFT)
-        tk.Label(left, text="3 tables", bg=COLORS["primary_soft"], fg=COLORS["primary"], font=sans(8, "bold"), padx=6).pack(anchor=tk.W)
+        tk.Label(
+            left, text=f"{len(TABLES)} tables", bg=COLORS["primary_soft"], fg=COLORS["primary"],
+            font=sans(8, "bold"), padx=6,
+        ).pack(anchor=tk.W)
         line = tk.Frame(left, bg=COLORS["header"])
         line.pack(anchor=tk.W, pady=(4, 0))
         tk.Label(line, text="Database Records", bg=COLORS["header"], fg=COLORS["strong"], font=sans(16, "bold")).pack(side=tk.LEFT)
@@ -161,8 +198,8 @@ class DatabaseViewer:
         tk.Label(picker, text="Table:", bg=COLORS["page"], fg=COLORS["muted"], font=sans(9)).pack(side=tk.LEFT, padx=(0, 4))
         for name in TABLES:
             button = FlatButton(
-                picker, name, lambda value=name: self.show_table(value), COLORS["card_high"], COLORS["dim"], COLORS["card_top"],
-                font_size=9, padx=12, pady=5, border=COLORS["line"], hover_fg=COLORS["strong"],
+                picker, TABLE_LABELS[name], lambda value=name: self.show_table(value), COLORS["card_high"], COLORS["dim"], COLORS["card_top"],
+                font_size=8, padx=9, pady=5, border=COLORS["line"], hover_fg=COLORS["strong"],
             )
             button.pack(side=tk.LEFT, padx=(6, 0))
             self.table_buttons[name] = button
@@ -376,12 +413,11 @@ class DatabaseViewer:
         if not path:
             return
         try:
-            # Password hashes are never exported.
-            columns = [c for c in TABLES[self.table_name]["columns"] if c != "password_hash"]
+            columns = list(TABLES[self.table_name]["columns"])
             with open(path, "w", newline="", encoding="utf-8-sig") as file:
                 writer = csv.writer(file)
                 writer.writerow(columns)
-                writer.writerows([[record[c] for c in columns] for record in self.records])
+                writer.writerows([[csv_safe(record[c]) for c in columns] for record in self.records])
         except OSError as error:
             messagebox.showerror("Export failed", f"The file could not be saved.\n\n{error}", parent=self.root)
             return
