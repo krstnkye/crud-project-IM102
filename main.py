@@ -37,6 +37,11 @@ LOG_COLORS = {
 }
 
 PAGE_TITLES = {"inventory": "Product Inventory System", "profile": "My Dashboard", "admin": "Admin Dashboard"}
+PAGE_DESCRIPTIONS = {
+    "inventory": "Product records, stock totals, and daily inventory work",
+    "profile": "Personal only - profile, password, photo, and your own activity",
+    "admin": "Admin only - approvals, users, roles, resets, and system-wide activity",
+}
 
 WINDOW_TITLE = "Product Inventory System"
 
@@ -352,9 +357,12 @@ class InventoryApp:
 
         if page == "profile" and user_id is not None and self.page_view.row is not None:
             title = f"Profile: {self.page_view.row['full_name']}"
+            description = "Admin account management - role, status, password reset, and this user's activity"
         else:
             title = PAGE_TITLES[page]
+            description = PAGE_DESCRIPTIONS[page]
         self.header_title.configure(text=title)
+        self.header_description.configure(text=description)
         self.paint_nav("Inventory", page == "inventory")
         self.paint_nav("My Dashboard", page == "profile" and user_id is None)
         if "Admin Dashboard" in self.nav_widgets:
@@ -386,8 +394,18 @@ class InventoryApp:
 
         left = tk.Frame(header, bg=COLORS["header"])
         left.pack(side=tk.LEFT, fill=tk.Y)
-        self.header_title = tk.Label(left, text=PAGE_TITLES["inventory"], bg=COLORS["header"], fg=COLORS["strong"], font=sans(14, "bold"))
-        self.header_title.pack(side=tk.LEFT)
+        title_group = tk.Frame(left, bg=COLORS["header"])
+        title_group.pack(side=tk.LEFT, fill=tk.Y, pady=5)
+        self.header_title = tk.Label(
+            title_group, text=PAGE_TITLES["inventory"], bg=COLORS["header"], fg=COLORS["strong"],
+            font=sans(13, "bold"), anchor=tk.W,
+        )
+        self.header_title.pack(anchor=tk.W)
+        self.header_description = tk.Label(
+            title_group, text=PAGE_DESCRIPTIONS["inventory"], bg=COLORS["header"], fg=COLORS["muted"],
+            font=sans(7), anchor=tk.W,
+        )
+        self.header_description.pack(anchor=tk.W)
 
         pill = tk.Frame(left, bg=COLORS["card_high"], padx=8, pady=3, highlightthickness=1, highlightbackground=COLORS["line_high"])
         pill.pack(side=tk.LEFT, padx=(16, 0))

@@ -92,6 +92,8 @@ Role-based access control (RBAC) checks the account's current saved role, active
 
 Click **My Dashboard** in the side menu, or click your name at the bottom of it. It shows:
 
+The page header identifies this as a **personal-only** workspace. It never exposes another user's account controls or system-wide activity.
+
 - Your name, username, role, user ID, when you joined, and when you last signed in
 - How many products you added, updated or added stock to, and deleted
 - Your own saved activity, newest first
@@ -101,6 +103,8 @@ Click **My Dashboard** in the side menu, or click your name at the bottom of it.
 ## Admin Dashboard (admins only)
 
 Click **Admin Dashboard** in the side menu. It shows:
+
+The page header identifies this as an **admin-only** workspace for approvals, users, roles, password resets, and system-wide activity.
 
 - Total Users, Active Users, Changes Today, and Changes in the Last 7 Days
 - **Pending Account Requests**, where an admin can approve a request as Staff or Admin, or reject it

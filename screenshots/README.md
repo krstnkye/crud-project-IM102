@@ -14,21 +14,30 @@ Pictures of the app used in the project documentation:
 - `11_delete_confirm.png` - asking to confirm before deleting
 - `12_delete_done.png` - the product list after deleting
 - `13_db_records.png` - the database records window
-- `15_sign_in.png` - the Sign In screen
-- `16_sign_in_error.png` - error for a wrong password
-- `17_sign_up.png` - the Create Account screen
-- `18_sign_up_error.png` - error when the two passwords do not match
+- `15_sign_in.png` - legacy combined Sign In screen retained as development history
+- `16_sign_in_error.png` - legacy combined-login error retained as development history
+- `17_sign_up.png` - legacy public Create Account screen retained as development history
+- `18_sign_up_error.png` - legacy Create Account validation retained as development history
 - `19_db_users.png` - the users table (only password hashes are saved)
 - `20_db_activity_log.png` - the activity_log table (who did what)
-- `21_sign_in_light.png` - the Sign In screen in light mode
-- `22_sign_up_done.png` - back on Sign In after creating an account
+- `21_sign_in_light.png` - legacy combined Sign In screen in light mode
+- `22_sign_up_done.png` - legacy public-account-creation result
 - `23_profile.png` - My Dashboard (the admin's own profile)
 - `24_profile_password_error.png` - error when the current password is wrong
 - `25_admin_dashboard.png` - the Admin Dashboard (users list and all activity)
 - `26_staff_profile_admin_view.png` - a staff profile opened by the admin, after Reset Password
 - `27_staff_inventory.png` - the inventory as staff (no Delete, no Database Records)
 - `28_staff_dashboard.png` - My Dashboard for a staff account
-- `29_sign_up_live.png` - live messages: username already taken, passwords do not match
-- `30_empty_box_warning.png` - warning for an earlier empty box (Full Name)
+- `29_sign_up_live.png` - legacy public Create Account live validation
+- `30_empty_box_warning.png` - legacy public Create Account empty-field warning
 - `31_profile_photo.png` - My Dashboard with a profile photo
+- `32_staff_login_current.png` - current separate Staff Login screen in dark mode
+- `33_admin_login_current.png` - current separate Admin Login screen with validation in dark mode
+- `34_request_account_current.png` - current approval-gated Request Account screen in dark mode
+- `35_request_role_options_current.png` - current requested-role selector showing Staff and Admin
+- `36_request_account_light_current.png` - current Request Account screen in light mode
+- `37_admin_login_light_current.png` - current separate Admin Login screen in light mode
+- `38_staff_login_light_current.png` - current separate Staff Login screen in light mode
+- `39_my_dashboard_personal_current.png` - current My Dashboard with the personal-only scope line
+- `40_admin_dashboard_management_current.png` - current Admin Dashboard with the admin-only scope line
 - `erd.png` - the entity-relationship diagram (ERD) of the database, including roles
