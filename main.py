@@ -272,7 +272,6 @@ class InventoryApp:
         """Who is signed in, with a Sign Out button."""
         card = tk.Frame(parent, bg=COLORS["card"], padx=10, pady=10, highlightthickness=1, highlightbackground=COLORS["line"], cursor="hand2")
         card.pack(fill=tk.X)
-        card.bind("<Button-1>", lambda event: self.show_page("profile"))
         row = tk.Frame(card, bg=COLORS["card"])
         row.pack(fill=tk.X)
         avatar = tk.Canvas(row, width=34, height=34, bg=COLORS["card"], highlightthickness=0)
@@ -285,11 +284,21 @@ class InventoryApp:
         names = tk.Frame(row, bg=COLORS["card"])
         names.pack(side=tk.LEFT, padx=(8, 0), fill=tk.X, expand=True)
         full_name = self.user.full_name if len(self.user.full_name) <= 18 else self.user.full_name[:17] + "…"
-        tk.Label(names, text=full_name, bg=COLORS["card"], fg=COLORS["strong"], font=sans(9, "bold"), anchor=tk.W).pack(fill=tk.X)
+        full_name_label = tk.Label(names, text=full_name, bg=COLORS["card"], fg=COLORS["strong"], font=sans(9, "bold"), anchor=tk.W, cursor="hand2")
+        full_name_label.pack(fill=tk.X)
         line = tk.Frame(names, bg=COLORS["card"])
         line.pack(fill=tk.X)
-        tk.Label(line, text=f"@{self.user.username}", bg=COLORS["card"], fg=COLORS["muted"], font=sans(8), anchor=tk.W).pack(side=tk.LEFT)
-        role_badge(line, self.user.role).pack(side=tk.LEFT, padx=(6, 0))
+        username_label = tk.Label(line, text=f"@{self.user.username}", bg=COLORS["card"], fg=COLORS["muted"], font=sans(8), anchor=tk.W, cursor="hand2")
+        username_label.pack(side=tk.LEFT)
+        badge = role_badge(line, self.user.role)
+        badge.configure(cursor="hand2")
+        badge.pack(side=tk.LEFT, padx=(6, 0))
+
+        # Tk events do not bubble from child labels to their parent frame. Bind every
+        # visible identity element so the whole profile card behaves like one control.
+        for widget in (card, row, avatar, names, full_name_label, line, username_label, badge):
+            widget.configure(cursor="hand2")
+            widget.bind("<Button-1>", lambda event: self.show_page("profile"))
         FlatButton(
             card, "Sign Out", self.sign_out, COLORS["card_high"], COLORS["dim"], COLORS["red_soft"],
             font_size=8, pady=5, border=COLORS["line_high"], hover_fg=COLORS["red"],
@@ -300,19 +309,19 @@ class InventoryApp:
         item.pack(fill=tk.X, padx=10, pady=1)
         stripe = tk.Frame(item, width=2)
         stripe.pack(side=tk.LEFT, fill=tk.Y)
-        icon_label = tk.Label(item, text="", width=1, pady=8)
+        icon_label = tk.Label(item, text=icon, width=1, pady=8)
         icon_label.pack(side=tk.LEFT, padx=(4, 4))
         text_label = tk.Label(item, text=text)
         text_label.pack(side=tk.LEFT)
         self.nav_widgets[text] = (item, stripe, icon_label, text_label)
         self.paint_nav(text, active)
-        widgets = (item, icon_label, text_label)
+        widgets = (item, stripe, icon_label, text_label)
 
         def hover(inside):
             if getattr(item, "active", False):
                 return
             color = COLORS["card"] if inside else COLORS["sidebar"]
-            for widget in widgets + (stripe,):
+            for widget in widgets:
                 widget.configure(bg=color)
 
         for widget in widgets:
@@ -810,9 +819,9 @@ class InventoryApp:
         combo.bind("<Return>", lambda event: self.save_from_keyboard())
 
     def bind_shortcuts(self):
-        self.root.bind("<Escape>", lambda event: self.clear_fields())
-        self.root.bind("<Control-f>", lambda event: self.search_entry.focus_set())
-        self.root.bind("<Control-F>", lambda event: self.search_entry.focus_set())
+        self.root.bind("<Escape>", lambda event: self.clear_product_form())
+        self.root.bind("<Control-f>", lambda event: self.focus_product_search())
+        self.root.bind("<Control-F>", lambda event: self.focus_product_search())
         self.root.bind("<Control-l>", lambda event: self.toggle_theme())
         self.root.bind("<Control-L>", lambda event: self.toggle_theme())
 
@@ -920,8 +929,20 @@ class InventoryApp:
         meter.create_line(threshold_x, 0, threshold_x, 13, fill=COLORS["red"], dash=(2, 2))
 
     def start_new_product(self):
+        """Open the inventory form in add mode from any page."""
+        self.show_page("inventory")
         self.clear_fields()
-        self.name_entry.focus_set()
+        self.root.after_idle(self.name_entry.focus_set)
+
+    def focus_product_search(self):
+        """Open Inventory and focus Search, including when invoked from a dashboard."""
+        self.show_page("inventory")
+        self.root.after_idle(self.search_entry.focus_set)
+
+    def clear_product_form(self):
+        """Make the global Esc/Clear shortcut visible and useful from every page."""
+        self.show_page("inventory")
+        self.clear_fields()
 
     def set_category_filter(self, category):
         self.category_filter = category

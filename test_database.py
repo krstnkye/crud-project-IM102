@@ -13,11 +13,12 @@ import tempfile
 import unittest
 import warnings
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import auth
 import database
 import database_viewer
-from main import parse_price, parse_quantity
+from main import InventoryApp, parse_price, parse_quantity
 from validation import ValidationError, validate_product, validate_sign_up
 
 
@@ -517,6 +518,34 @@ class InputCheckTests(unittest.TestCase):
                 validate_sign_up(*values)
             self.assertEqual(caught.exception.field, field, values)
 
+
+class UICommandTests(unittest.TestCase):
+    """Small callback tests that do not require a visible Tk desktop."""
+
+    def test_new_product_opens_inventory_clears_and_focuses_name(self):
+        app = MagicMock()
+
+        InventoryApp.start_new_product(app)
+
+        app.show_page.assert_called_once_with("inventory")
+        app.clear_fields.assert_called_once_with()
+        app.root.after_idle.assert_called_once_with(app.name_entry.focus_set)
+
+    def test_search_shortcut_opens_inventory_and_focuses_search(self):
+        app = MagicMock()
+
+        InventoryApp.focus_product_search(app)
+
+        app.show_page.assert_called_once_with("inventory")
+        app.root.after_idle.assert_called_once_with(app.search_entry.focus_set)
+
+    def test_clear_shortcut_opens_inventory_and_clears_form(self):
+        app = MagicMock()
+
+        InventoryApp.clear_product_form(app)
+
+        app.show_page.assert_called_once_with("inventory")
+        app.clear_fields.assert_called_once_with()
 
 if __name__ == "__main__":
     unittest.main()
